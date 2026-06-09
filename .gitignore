@@ -1,4 +1,5 @@
 .env
+.claude/
 bot.log
 daily_counter.json
 trade_log.json
