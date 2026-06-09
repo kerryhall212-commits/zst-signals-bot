@@ -1,0 +1,7 @@
+.env
+bot.log
+daily_counter.json
+trade_log.json
+__pycache__/
+*.pyc
+*.pyo
