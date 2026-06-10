@@ -105,7 +105,7 @@ def _format_news_event(event: dict) -> str:
 def build_briefing_message() -> str:
     now_ldn  = datetime.now(ZoneInfo("Europe/London"))
     day_str  = now_ldn.strftime("%A")
-    date_str = now_ldn.strftime("%-d %B %Y")
+    date_str = f"{now_ldn.day} {now_ldn.strftime('%B %Y')}"
     levels   = _fetch_levels()
     news     = _fetch_todays_news()
 
