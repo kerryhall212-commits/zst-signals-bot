@@ -19,6 +19,7 @@ import daily_counter
 import trade_log
 from price_monitor import check_open_trades
 from weekly_review import post_weekly_review
+from morning_briefing import post_morning_briefing
 
 logging.basicConfig(
     level=logging.INFO,
@@ -27,9 +28,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_last_signals:      dict[str, str] = {}
-_scanned_closes:    set[str]       = set()
-_review_posted_week: str           = ""
+_last_signals:       dict[str, str] = {}
+_scanned_closes:     set[str]       = set()
+_review_posted_week: str            = ""
+_briefing_posted_day: str           = ""
 
 LIMIT_REACHED_MSG = (
     "🔒 ZST SIGNAL LIMIT REACHED\n"
@@ -52,6 +54,12 @@ def near_4h_close() -> bool:
 def close_key() -> str:
     now = datetime.now(timezone.utc)
     return f"{now.date()}-{now.hour:02d}"
+
+
+def near_morning_briefing() -> bool:
+    """Returns True on weekdays at 07:00–07:10 UTC (London Open prep)."""
+    now = datetime.now(timezone.utc)
+    return now.weekday() < 5 and now.hour == 7 and now.minute < 10
 
 
 def near_friday_review() -> bool:
@@ -131,7 +139,7 @@ def run_signals():
 
 
 def main():
-    global _review_posted_week
+    global _review_posted_week, _briefing_posted_day
 
     logger.info("ZST Signals Bot starting (4H wick sweep engine).")
 
@@ -154,6 +162,11 @@ def main():
     logger.info("Entering 4H candle close watch loop (polls every 5 min).")
     while True:
         time.sleep(300)
+        if near_morning_briefing():
+            today = str(datetime.now(timezone.utc).date())
+            if today != _briefing_posted_day:
+                post_morning_briefing()
+                _briefing_posted_day = today
         if near_4h_close():
             run_signals()
             check_open_trades()
