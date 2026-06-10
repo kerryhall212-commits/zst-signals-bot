@@ -6,6 +6,7 @@ The loop checks every 5 minutes and scans only when within
 """
 
 import logging
+import os
 import time
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
@@ -133,6 +134,20 @@ def main():
     global _review_posted_week
 
     logger.info("ZST Signals Bot starting (4H wick sweep engine).")
+
+    # Validate required env vars at startup so failures are obvious in Railway logs
+    td_key = os.getenv("TWELVEDATA_API_KEY")
+    tg_token = os.getenv("TELEGRAM_BOT_TOKEN")
+    tg_chat = os.getenv("TELEGRAM_CHANNEL_ID")
+    logger.info(
+        "Env check — TWELVEDATA_API_KEY: %s | TELEGRAM_BOT_TOKEN: %s | TELEGRAM_CHANNEL_ID: %s",
+        f"set ({td_key[:4]}...)" if td_key else "NOT SET",
+        "set" if tg_token else "NOT SET",
+        tg_chat or "NOT SET",
+    )
+    if not td_key:
+        logger.error("TWELVEDATA_API_KEY is missing — bot will fail on first API call.")
+
     run_signals()
     check_open_trades()
 
