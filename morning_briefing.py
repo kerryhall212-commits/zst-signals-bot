@@ -109,59 +109,48 @@ def build_briefing_message() -> str:
     levels   = _fetch_levels()
     news     = _fetch_todays_news()
 
-    lines = [
-        "🌅 <b>ZST DAILY BRIEFING</b>",
-        f"{day_str} {date_str} | London Open Prep",
-        "",
-        _SCRIPTURE,
-        "",
-        _SEP,
-        "📍 <b>KEY LEVELS TODAY</b>",
-        "",
-    ]
-
+    # ── Key levels — one line per symbol ────────────────────────────────────
+    level_lines = []
     for sym_key in ("GOLD", "US30"):
-        lv  = levels.get(sym_key)
-        cfg = SYMBOLS.get(sym_key, {})
-
-        header = "GOLD (XAU/USD):" if sym_key == "GOLD" else f"{cfg.get('display', sym_key)}:"
-        lines.append(f"<b>{header}</b>")
-
+        lv      = levels.get(sym_key)
+        display = "GOLD" if sym_key == "GOLD" else "US30"
         if lv:
-            lines.append(f"PDH: {_fmt(lv['pdh'], 0)}")
-            lines.append(f"PDL: {_fmt(lv['pdl'], 0)}")
+            level_lines.append(
+                f"{display}  PDH: {_fmt(lv['pdh'], 0)}  |  PDL: {_fmt(lv['pdl'], 0)}"
+            )
         else:
-            lines.append("Data unavailable")
+            level_lines.append(f"{display}  Data unavailable")
 
-        if sym_key != "US30":
-            lines.append("")
-
-    lines += [_SEP]
-
-    # Bias per symbol on one line
+    # ── Bias ─────────────────────────────────────────────────────────────────
     bias_parts = []
     for sym_key in ("GOLD", "US30"):
         lv      = levels.get(sym_key)
-        display = SYMBOLS.get(sym_key, {}).get("display", sym_key)
+        display = "GOLD" if sym_key == "GOLD" else "US30"
         b       = _bias(lv["current"], lv["pdh"], lv["pdl"]) if lv else "N/A"
         bias_parts.append(f"{display}: {b}")
-    lines.append(f"⚡ BIAS: {' | '.join(bias_parts)}")
 
-    # Today's news
+    # ── News — deduplicate by time, group titles ──────────────────────────────
     if news:
-        lines.append("📰 NEWS TODAY")
-        lines.extend(_format_news_event(e) for e in news)
+        news_lines = [_format_news_event(e) for e in news]
     else:
-        lines.append("📰 NEWS: No high-impact USD events today ✅")
+        news_lines = ["📰 No high-impact USD events today ✅"]
 
-    lines += [
+    return "\n".join([
+        "🌅 ZST DAILY BRIEFING",
+        f"{day_str} {date_str} | London Open Prep",
+        "",
+        _SCRIPTURE,
+        _SEP,
+        "📍 KEY LEVELS",
+        *level_lines,
+        _SEP,
+        f"⚡ BIAS: {' | '.join(bias_parts)}",
+        *news_lines,
         _SEP,
         "Trade the levels. Trust the process.",
         "Zero Stress. Always. 🤎",
         "ZST Insider 🔐",
-    ]
-
-    return "\n".join(lines)
+    ])
 
 
 def post_morning_briefing() -> None:
