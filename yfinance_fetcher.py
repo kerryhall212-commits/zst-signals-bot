@@ -19,8 +19,11 @@ _FETCH_PARAMS = {
 def fetch_ohlcv_yf(symbol: str, interval: str, outputsize: int = 100) -> pd.DataFrame:
     period, yf_interval = _FETCH_PARAMS.get(interval, ("60d", "1h"))
 
-    raw = yf.download(symbol, period=period, interval=yf_interval,
-                      progress=False, auto_adjust=True)
+    # yf.Ticker().history() is more reliable than yf.download() for index tickers
+    # like ^DJI — avoids the spurious "possibly delisted" warning on the download API.
+    ticker = yf.Ticker(symbol)
+    raw = ticker.history(period=period, interval=yf_interval,
+                         auto_adjust=True, actions=False)
     if raw.empty:
         raise ValueError(f"yfinance returned no data for {symbol} [{interval}]")
 
