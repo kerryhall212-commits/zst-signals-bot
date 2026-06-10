@@ -39,6 +39,7 @@ _scanned_closes:        set[str]       = set()
 _review_posted_week:    str            = ""
 _briefing_posted_day:   str            = ""
 _morning_signal_day:    str            = ""
+_eod_posted_day:        str            = ""
 _tt_scanned:            set[str]       = set()   # "{date}-{session}" keys
 
 _LIMIT_FOOTER = (
@@ -60,28 +61,50 @@ def close_key() -> str:
     return f"{now.date()}-{now.hour:02d}"
 
 
+def _bst_mins() -> int:
+    now_bst = datetime.now(ZoneInfo("Europe/London"))
+    return now_bst.hour * 60 + now_bst.minute
+
+
+def is_briefing_window() -> bool:
+    """True on weekdays from 05:45 BST onwards (until EOD). Used for retry loop."""
+    now_bst = datetime.now(ZoneInfo("Europe/London"))
+    return now_bst.weekday() < 5 and _bst_mins() >= 5 * 60 + 45
+
+
+def is_scan_window() -> bool:
+    """True if briefing has posted today and current BST time is before 22:00."""
+    now_bst = datetime.now(ZoneInfo("Europe/London"))
+    if now_bst.weekday() >= 5:
+        return False
+    today_bst = str(now_bst.date())
+    if today_bst != _briefing_posted_day:
+        return False
+    return _bst_mins() < 22 * 60
+
+
 def near_7am_bst() -> bool:
-    """Returns True on weekdays at 07:00–07:10 BST (morning priority signal window)."""
+    """True on weekdays at 07:00–07:10 BST (5-7AM pullback confirmation window)."""
     now_bst = datetime.now(ZoneInfo("Europe/London"))
     return now_bst.weekday() < 5 and now_bst.hour == 7 and now_bst.minute < 10
 
 
-def near_morning_briefing() -> bool:
-    """Returns True on weekdays at 07:00–07:10 UTC (London Open prep)."""
-    now = datetime.now(timezone.utc)
-    return now.weekday() < 5 and now.hour == 7 and now.minute < 10
+def near_ny_open() -> bool:
+    """True on Tuesdays at 13:30–13:40 BST (NY Open, TT check)."""
+    now_bst = datetime.now(ZoneInfo("Europe/London"))
+    return now_bst.weekday() == 1 and now_bst.hour == 13 and 30 <= now_bst.minute < 40
+
+
+def near_eod_alert() -> bool:
+    """True on weekdays at 21:00–21:10 BST."""
+    now_bst = datetime.now(ZoneInfo("Europe/London"))
+    return now_bst.weekday() < 5 and now_bst.hour == 21 and now_bst.minute < 10
 
 
 def near_friday_review() -> bool:
-    """Returns True on Friday at 20:00 BST (within a 5-minute window)."""
-    now_london = datetime.now(ZoneInfo("Europe/London"))
-    return now_london.weekday() == 4 and now_london.hour == 20 and now_london.minute < 5
-
-
-def near_ny_open() -> bool:
-    """Returns True on Tuesdays at 13:30–13:40 BST (NY Open, TT check)."""
+    """True on Friday at 20:00–20:05 BST."""
     now_bst = datetime.now(ZoneInfo("Europe/London"))
-    return now_bst.weekday() == 1 and now_bst.hour == 13 and 30 <= now_bst.minute < 40
+    return now_bst.weekday() == 4 and now_bst.hour == 20 and now_bst.minute < 5
 
 
 def _tt_session_key(session: str) -> str:
@@ -102,6 +125,10 @@ def run_tt_session(session_override: str | None = None) -> None:
     if key in _tt_scanned:
         return
     _tt_scanned.add(key)
+
+    if not is_scan_window():
+        logger.info("[TT] Scan blocked — briefing not yet posted or outside scan window.")
+        return
 
     if daily_counter.is_limit_reached():
         logger.info("[TT] Daily limit reached — skipping %s scan.", session)
@@ -141,6 +168,10 @@ def run_tt_session(session_override: str | None = None) -> None:
 
 def run_morning_signal() -> None:
     """Run the 5-7AM continuation pullback check for all symbols."""
+    if not is_scan_window():
+        logger.info("[MS] Scan blocked — briefing not yet posted or outside scan window.")
+        return
+
     if daily_counter.is_limit_reached():
         logger.info("[MS] Daily limit reached — skipping morning signal.")
         return
@@ -177,6 +208,28 @@ def run_morning_signal() -> None:
     logger.info("── Morning signal scan complete ──")
 
 
+def post_eod_alert() -> None:
+    now_bst  = datetime.now(ZoneInfo("Europe/London"))
+    day_str  = now_bst.strftime("%A")
+    date_str = f"{now_bst.day} {now_bst.strftime('%B %Y')}"
+    count    = daily_counter.get_count()
+    msg = "\n".join([
+        "🌙 <b>ZST END OF DAY</b>",
+        f"{day_str} {date_str}",
+        "",
+        "Trading day complete.",
+        f"Signals today: {count}/{daily_counter.MAX_DAILY}",
+        "",
+        "Rest well. Come back focused tomorrow. 🙏",
+        "Zero Stress. Always. 🤎",
+        "ZST Insider 🔐",
+    ])
+    if send_message(msg):
+        logger.info("EOD alert posted.")
+    else:
+        logger.error("EOD alert send failed.")
+
+
 def _current_week() -> str:
     iso = datetime.now(timezone.utc).isocalendar()
     return f"{iso[0]}-W{iso[1]:02d}"
@@ -189,6 +242,11 @@ def run_signals():
     _scanned_closes.add(key)
 
     logger.info(f"── 1H close scan: {key} ──")
+
+    if not is_scan_window():
+        logger.info("Scan blocked — briefing not yet posted or outside scan window.")
+        logger.info("── Scan complete ──")
+        return
 
     if daily_counter.is_limit_reached():
         logger.info("Daily signal limit already reached — skipping scan.")
@@ -252,14 +310,13 @@ def run_signals():
 
 
 def main():
-    global _review_posted_week, _briefing_posted_day, _morning_signal_day
+    global _review_posted_week, _briefing_posted_day, _morning_signal_day, _eod_posted_day
 
-    logger.info("ZST Signals Bot starting (4H wick sweep engine).")
+    logger.info("ZST Signals Bot starting (1H wick sweep engine).")
 
-    # Validate required env vars at startup so failures are obvious in Railway logs
-    td_key = os.getenv("TWELVEDATA_API_KEY")
+    td_key   = os.getenv("TWELVEDATA_API_KEY")
     tg_token = os.getenv("TELEGRAM_BOT_TOKEN")
-    tg_chat = os.getenv("TELEGRAM_CHANNEL_ID")
+    tg_chat  = os.getenv("TELEGRAM_CHANNEL_ID")
     logger.info(
         "Env check — TWELVEDATA_API_KEY: %s | TELEGRAM_BOT_TOKEN: %s | TELEGRAM_CHANNEL_ID: %s",
         f"set ({td_key[:4]}...)" if td_key else "NOT SET",
@@ -269,32 +326,46 @@ def main():
     if not td_key:
         logger.error("TWELVEDATA_API_KEY is missing — bot will fail on first API call.")
 
-    run_signals()
-    check_open_trades()
-
-    logger.info("Entering 4H candle close watch loop (polls every 5 min).")
+    logger.info("Entering main loop (polls every 5 min).")
     while True:
-        time.sleep(300)
-        if near_morning_briefing():
-            today = str(datetime.now(timezone.utc).date())
-            if today != _briefing_posted_day:
-                post_morning_briefing()
-                _briefing_posted_day = today
-        if near_7am_bst():
-            today_bst = str(datetime.now(ZoneInfo("Europe/London")).date())
-            if today_bst != _morning_signal_day:
-                run_morning_signal()
-                _morning_signal_day = today_bst
+        now_bst   = datetime.now(ZoneInfo("Europe/London"))
+        today_bst = str(now_bst.date())
+
+        # ── 1. Briefing: 05:45 BST — retry every poll until success ──────────
+        if is_briefing_window() and today_bst != _briefing_posted_day:
+            if post_morning_briefing():
+                _briefing_posted_day = today_bst
+                logger.info("Briefing posted — scanning now unlocked for today.")
+            else:
+                logger.warning("Briefing failed — will retry next poll. Scans remain blocked.")
+
+        # ── 2. Morning priority signal: 07:00 BST ────────────────────────────
+        if near_7am_bst() and today_bst != _morning_signal_day:
+            run_morning_signal()
+            _morning_signal_day = today_bst
+
+        # ── 3. TT NY session: 13:30 BST (Tuesdays only) ──────────────────────
         if near_ny_open():
             run_tt_session("NY")
+
+        # ── 4. Hourly 1H close scan ───────────────────────────────────────────
         if near_1h_close():
             run_signals()
             check_open_trades()
+
+        # ── 5. EOD alert: 21:00 BST ───────────────────────────────────────────
+        if near_eod_alert() and today_bst != _eod_posted_day:
+            post_eod_alert()
+            _eod_posted_day = today_bst
+
+        # ── 6. Friday weekly review: 20:00 BST ───────────────────────────────
         if near_friday_review():
             week = _current_week()
             if week != _review_posted_week:
                 post_weekly_review()
                 _review_posted_week = week
+
+        time.sleep(300)
 
 
 if __name__ == "__main__":

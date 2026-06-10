@@ -153,13 +153,15 @@ def build_briefing_message() -> str:
     ])
 
 
-def post_morning_briefing() -> None:
+def post_morning_briefing() -> bool:
     logger.info("Posting morning briefing...")
     try:
         msg = build_briefing_message()
         if send_message(msg):
             logger.info("Morning briefing posted successfully.")
-        else:
-            logger.error("Morning briefing Telegram send failed.")
+            return True
+        logger.error("Morning briefing Telegram send failed.")
+        return False
     except Exception as e:
         logger.exception("Morning briefing error: %s", e)
+        return False
