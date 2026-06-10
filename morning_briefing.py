@@ -131,8 +131,11 @@ def build_briefing_message() -> str:
         if lv:
             lines.append(f"PDH: {_fmt(lv['pdh'], d)}")
             lines.append(f"PDL: {_fmt(lv['pdl'], d)}")
-            lines.append(f"Asian High: {_fmt(lv['ash'], d)}")
-            lines.append(f"Asian Low:  {_fmt(lv['asl'], d)}")
+            if sym_key == "GOLD":
+                if lv["ash"] is not None:
+                    lines.append(f"Asian High: {_fmt(lv['ash'], d)}")
+                if lv["asl"] is not None:
+                    lines.append(f"Asian Low:  {_fmt(lv['asl'], d)}")
         else:
             lines.append("  Data unavailable")
 
