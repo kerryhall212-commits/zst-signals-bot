@@ -83,7 +83,7 @@ def format_smc_message(symbol_config: dict, signal: dict) -> str:
         "",
         f"R:R: {signal.get('rr', '—')}",
         f"Reason: {signal['reason']}",
-        f"Invalidation: 4H close {side} <code>{fmt(signal['invalidation_price'], d)}</code>",
+        f"Invalidation: 1H close {side} <code>{fmt(signal['invalidation_price'], d)}</code>",
         "",
         "ZST Insider 🔐",
     ]

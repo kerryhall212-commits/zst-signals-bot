@@ -1,10 +1,11 @@
 """
-4H Wick Sweep Signal Engine — Smart Money Concepts
+1H Wick Sweep Signal Engine — Smart Money Concepts
 
-Signal fires on every 4H candle close (00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC).
+Signal fires on every 1H candle close (top of each UTC hour).
 Two-candle pattern: sweep candle + confirmation candle (both must be complete).
+TP3 structure (swing highs/lows) is still sourced from 4H bars for cleaner major levels.
 
-TwelveData note: forex instruments (XAU/USD) have candle timestamps in UTC+3,
+TwelheData note: forex instruments (XAU/USD) have candle timestamps in UTC+3,
 labeled with the candle CLOSE time. The 'td_tz_offset' in each symbol config
 converts that timestamp to a true UTC close time so session and completeness
 checks work correctly.
@@ -16,7 +17,7 @@ import pandas as pd
 
 from data_fetcher import fetch_ohlcv
 from key_levels import get_all_levels
-from config import H4_BARS, DAY_BARS, WEEK_BARS
+from config import H1_BARS, H4_BARS, DAY_BARS, WEEK_BARS
 
 logger = logging.getLogger(__name__)
 
@@ -38,17 +39,17 @@ def _td_to_utc_close(time_str: str, tz_offset: int) -> datetime:
     return datetime.fromisoformat(time_str) - timedelta(hours=tz_offset)
 
 
-def drop_incomplete_candle(h4_df: pd.DataFrame, tz_offset: int) -> pd.DataFrame:
+def drop_incomplete_candle(df: pd.DataFrame, tz_offset: int) -> pd.DataFrame:
     """
-    TwelveData includes the current (not-yet-closed) 4H candle in time series.
+    TwelveData includes the current (not-yet-closed) candle in time series.
     Drop it: if the UTC close time of the last candle is still in the future,
     that candle is incomplete.
     """
     now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-    last_utc_close = _td_to_utc_close(h4_df.iloc[-1]["time"], tz_offset)
+    last_utc_close = _td_to_utc_close(df.iloc[-1]["time"], tz_offset)
     if last_utc_close > now_utc:
-        return h4_df.iloc[:-1].reset_index(drop=True)
-    return h4_df
+        return df.iloc[:-1].reset_index(drop=True)
+    return df
 
 
 def is_london_ny_session(candle_time_str: str, tz_offset: int) -> bool:
@@ -161,7 +162,7 @@ def _build_signal(direction: str, quality: str, entry: float, sl: float,
         "tp2":                tp2,
         "tp3":                tp3,
         "rr":                 rr_label,
-        "reason":             f"{swept_names} swept on 4H — wick rejection confirmed",
+        "reason":             f"{swept_names} swept on 1H — wick rejection confirmed",
         "invalidation_price": sl,
         "invalidation_side":  inv_side,
     }
@@ -211,20 +212,20 @@ def generate_smc_signal(symbol_config: dict) -> dict | None:
         weekly = _fetch(symbol_config, "1week", WEEK_BARS)
         daily  = _fetch(symbol_config, "1day",  DAY_BARS)
         h4     = _fetch(symbol_config, "4h",    H4_BARS)
-        h1     = _fetch(symbol_config, "1h",    200)
+        h1     = _fetch(symbol_config, "1h",    H1_BARS)
     except Exception as e:
         logger.error(f"[{sym}] Fetch failed: {e}")
         return None
 
-    # Drop the current incomplete candle if TwelveData included it
-    h4 = drop_incomplete_candle(h4, tz_offset)
+    # Drop the current incomplete 1H candle if TwelveData included it
+    h1 = drop_incomplete_candle(h1, tz_offset)
 
-    if len(h4) < 4:
-        logger.warning(f"[{sym}] Not enough complete 4H bars.")
+    if len(h1) < 4:
+        logger.warning(f"[{sym}] Not enough complete 1H bars.")
         return None
 
-    confirm = h4.iloc[-1]   # last COMPLETED 4H candle = displacement confirmation
-    sweep   = h4.iloc[-2]   # candle before that = sweep candle being validated
+    confirm = h1.iloc[-1]   # last COMPLETED 1H candle = displacement confirmation
+    sweep   = h1.iloc[-2]   # candle before that = sweep candle being validated
 
     logger.info(f"[{sym}] Confirm: {confirm['time']}  Sweep: {sweep['time']}")
 

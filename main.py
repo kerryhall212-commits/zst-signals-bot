@@ -49,10 +49,10 @@ _LIMIT_FOOTER = (
 )
 
 
-def near_4h_close() -> bool:
-    """Returns True during the 10-minute window after a 4H UTC candle close."""
+def near_1h_close() -> bool:
+    """Returns True during the 10-minute window after each UTC hourly candle close."""
     now = datetime.now(timezone.utc)
-    return now.hour % 4 == 0 and now.minute < 10
+    return now.minute < 10
 
 
 def close_key() -> str:
@@ -188,7 +188,7 @@ def run_signals():
         return
     _scanned_closes.add(key)
 
-    logger.info(f"── 4H close scan: {key} ──")
+    logger.info(f"── 1H close scan: {key} ──")
 
     if daily_counter.is_limit_reached():
         logger.info("Daily signal limit already reached — skipping scan.")
@@ -246,7 +246,7 @@ def run_signals():
 
     logger.info("── Scan complete ──")
 
-    # Textbook Tuesday check at each 4H close (covers Asian + London sessions)
+    # Textbook Tuesday check at each 1H close (covers Asian + London sessions)
     if is_tuesday_bst():
         run_tt_session()
 
@@ -287,7 +287,7 @@ def main():
                 _morning_signal_day = today_bst
         if near_ny_open():
             run_tt_session("NY")
-        if near_4h_close():
+        if near_1h_close():
             run_signals()
             check_open_trades()
         if near_friday_review():
