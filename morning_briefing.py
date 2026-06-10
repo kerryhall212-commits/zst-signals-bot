@@ -123,23 +123,18 @@ def build_briefing_message() -> str:
     for sym_key in ("GOLD", "US30"):
         lv  = levels.get(sym_key)
         cfg = SYMBOLS.get(sym_key, {})
-        d   = cfg.get("decimals", 2)
 
         header = "GOLD (XAU/USD):" if sym_key == "GOLD" else f"{cfg.get('display', sym_key)}:"
         lines.append(f"<b>{header}</b>")
 
         if lv:
-            lines.append(f"PDH: {_fmt(lv['pdh'], d)}")
-            lines.append(f"PDL: {_fmt(lv['pdl'], d)}")
-            if sym_key == "GOLD":
-                if lv["ash"] is not None:
-                    lines.append(f"Asian High: {_fmt(lv['ash'], d)}")
-                if lv["asl"] is not None:
-                    lines.append(f"Asian Low:  {_fmt(lv['asl'], d)}")
+            lines.append(f"PDH: {_fmt(lv['pdh'], 0)}")
+            lines.append(f"PDL: {_fmt(lv['pdl'], 0)}")
         else:
-            lines.append("  Data unavailable")
+            lines.append("Data unavailable")
 
-        lines.append("")
+        if sym_key != "US30":
+            lines.append("")
 
     lines += [_SEP]
 
