@@ -24,6 +24,7 @@ from textbook_tuesday import (
     generate_tt_signal, format_tt_message,
     is_tuesday_bst, current_session,
 )
+from morning_signal import generate_morning_signal, format_morning_signal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,11 +33,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_last_signals:        dict[str, str] = {}
-_scanned_closes:      set[str]       = set()
-_review_posted_week:  str            = ""
-_briefing_posted_day: str            = ""
-_tt_scanned:          set[str]       = set()   # "{date}-{session}" keys
+_last_signals:          dict[str, str] = {}
+_scanned_closes:        set[str]       = set()
+_review_posted_week:    str            = ""
+_briefing_posted_day:   str            = ""
+_morning_signal_day:    str            = ""
+_tt_scanned:            set[str]       = set()   # "{date}-{session}" keys
 
 _LIMIT_FOOTER = (
     "\n\n🔒 Final signal for the day.\n"
@@ -55,6 +57,12 @@ def near_4h_close() -> bool:
 def close_key() -> str:
     now = datetime.now(timezone.utc)
     return f"{now.date()}-{now.hour:02d}"
+
+
+def near_7am_bst() -> bool:
+    """Returns True on weekdays at 07:00–07:10 BST (morning priority signal window)."""
+    now_bst = datetime.now(ZoneInfo("Europe/London"))
+    return now_bst.weekday() < 5 and now_bst.hour == 7 and now_bst.minute < 10
 
 
 def near_morning_briefing() -> bool:
@@ -124,6 +132,40 @@ def run_tt_session(session_override: str | None = None) -> None:
             logger.error("[TT][%s] Send failed.", sym_key)
 
     logger.info("── TT scan complete ──")
+
+
+def run_morning_signal() -> None:
+    """Run the 5-7AM continuation pullback check for all symbols."""
+    if daily_counter.is_limit_reached():
+        logger.info("[MS] Daily limit reached — skipping morning signal.")
+        return
+
+    logger.info("── Morning signal scan (5-7AM pullback) ──")
+
+    for sym_key, info in SYMBOLS.items():
+        if daily_counter.is_limit_reached():
+            break
+
+        signal = generate_morning_signal(info)
+        if signal is None:
+            continue
+
+        is_final = (daily_counter.get_count() + 1 >= daily_counter.MAX_DAILY)
+        msg = format_morning_signal(info, signal)
+        if is_final:
+            msg += _LIMIT_FOOTER
+
+        if send_message(msg):
+            count, just_hit = daily_counter.increment()
+            trade_log.record_signal(sym_key, info, signal)
+            logger.info("[MS][%s] Signal posted. Daily count: %d/%d",
+                        sym_key, count, daily_counter.MAX_DAILY)
+            if just_hit:
+                daily_counter.mark_limit_notified()
+        else:
+            logger.error("[MS][%s] Send failed.", sym_key)
+
+    logger.info("── Morning signal scan complete ──")
 
 
 def _current_week() -> str:
@@ -196,7 +238,7 @@ def run_signals():
 
 
 def main():
-    global _review_posted_week, _briefing_posted_day
+    global _review_posted_week, _briefing_posted_day, _morning_signal_day
 
     logger.info("ZST Signals Bot starting (4H wick sweep engine).")
 
@@ -224,6 +266,11 @@ def main():
             if today != _briefing_posted_day:
                 post_morning_briefing()
                 _briefing_posted_day = today
+        if near_7am_bst():
+            today_bst = str(datetime.now(ZoneInfo("Europe/London")).date())
+            if today_bst != _morning_signal_day:
+                run_morning_signal()
+                _morning_signal_day = today_bst
         if near_ny_open():
             run_tt_session("NY")
         if near_4h_close():
