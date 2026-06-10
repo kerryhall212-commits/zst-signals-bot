@@ -25,6 +25,7 @@ from textbook_tuesday import (
     is_tuesday_bst, current_session,
 )
 from morning_signal import generate_morning_signal, format_morning_signal
+from news_filter import is_news_blackout
 
 logging.basicConfig(
     level=logging.INFO,
@@ -106,6 +107,10 @@ def run_tt_session(session_override: str | None = None) -> None:
         logger.info("[TT] Daily limit reached — skipping %s scan.", session)
         return
 
+    if is_news_blackout():
+        logger.info("[TT] News blackout active — skipping %s scan.", session)
+        return
+
     logger.info("── TT scan: %s session ──", session)
 
     for sym_key, info in SYMBOLS.items():
@@ -138,6 +143,10 @@ def run_morning_signal() -> None:
     """Run the 5-7AM continuation pullback check for all symbols."""
     if daily_counter.is_limit_reached():
         logger.info("[MS] Daily limit reached — skipping morning signal.")
+        return
+
+    if is_news_blackout():
+        logger.info("[MS] News blackout active — skipping morning signal.")
         return
 
     logger.info("── Morning signal scan (5-7AM pullback) ──")
@@ -183,6 +192,11 @@ def run_signals():
 
     if daily_counter.is_limit_reached():
         logger.info("Daily signal limit already reached — skipping scan.")
+        logger.info("── Scan complete ──")
+        return
+
+    if is_news_blackout():
+        logger.info("News blackout active — skipping 4H scan.")
         logger.info("── Scan complete ──")
         return
 
