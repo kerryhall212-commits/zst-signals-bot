@@ -20,6 +20,10 @@ import trade_log
 from price_monitor import check_open_trades
 from weekly_review import post_weekly_review
 from morning_briefing import post_morning_briefing
+from textbook_tuesday import (
+    generate_tt_signal, format_tt_message,
+    is_tuesday_bst, current_session,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,10 +32,11 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_last_signals:       dict[str, str] = {}
-_scanned_closes:     set[str]       = set()
-_review_posted_week: str            = ""
-_briefing_posted_day: str           = ""
+_last_signals:        dict[str, str] = {}
+_scanned_closes:      set[str]       = set()
+_review_posted_week:  str            = ""
+_briefing_posted_day: str            = ""
+_tt_scanned:          set[str]       = set()   # "{date}-{session}" keys
 
 _LIMIT_FOOTER = (
     "\n\n🔒 Final signal for the day.\n"
@@ -62,6 +67,63 @@ def near_friday_review() -> bool:
     """Returns True on Friday at 20:00 BST (within a 5-minute window)."""
     now_london = datetime.now(ZoneInfo("Europe/London"))
     return now_london.weekday() == 4 and now_london.hour == 20 and now_london.minute < 5
+
+
+def near_ny_open() -> bool:
+    """Returns True on Tuesdays at 13:30–13:40 BST (NY Open, TT check)."""
+    now_bst = datetime.now(ZoneInfo("Europe/London"))
+    return now_bst.weekday() == 1 and now_bst.hour == 13 and 30 <= now_bst.minute < 40
+
+
+def _tt_session_key(session: str) -> str:
+    today = str(datetime.now(ZoneInfo("Europe/London")).date())
+    return f"{today}-{session}"
+
+
+def run_tt_session(session_override: str | None = None) -> None:
+    """Run Textbook Tuesday detection for the given (or current) session."""
+    if not is_tuesday_bst():
+        return
+
+    session = session_override or current_session()
+    if session is None:
+        return
+
+    key = _tt_session_key(session)
+    if key in _tt_scanned:
+        return
+    _tt_scanned.add(key)
+
+    if daily_counter.is_limit_reached():
+        logger.info("[TT] Daily limit reached — skipping %s scan.", session)
+        return
+
+    logger.info("── TT scan: %s session ──", session)
+
+    for sym_key, info in SYMBOLS.items():
+        if daily_counter.is_limit_reached():
+            break
+
+        signal = generate_tt_signal(info, session)
+        if signal is None:
+            continue
+
+        is_final = (daily_counter.get_count() + 1 >= daily_counter.MAX_DAILY)
+        msg = format_tt_message(info, signal)
+        if is_final:
+            msg += _LIMIT_FOOTER
+
+        if send_message(msg):
+            count, just_hit = daily_counter.increment()
+            trade_log.record_signal(sym_key, info, signal)
+            logger.info("[TT][%s] Signal posted. Daily count: %d/%d",
+                        sym_key, count, daily_counter.MAX_DAILY)
+            if just_hit:
+                daily_counter.mark_limit_notified()
+        else:
+            logger.error("[TT][%s] Send failed.", sym_key)
+
+    logger.info("── TT scan complete ──")
 
 
 def _current_week() -> str:
@@ -128,6 +190,10 @@ def run_signals():
 
     logger.info("── Scan complete ──")
 
+    # Textbook Tuesday check at each 4H close (covers Asian + London sessions)
+    if is_tuesday_bst():
+        run_tt_session()
+
 
 def main():
     global _review_posted_week, _briefing_posted_day
@@ -158,6 +224,8 @@ def main():
             if today != _briefing_posted_day:
                 post_morning_briefing()
                 _briefing_posted_day = today
+        if near_ny_open():
+            run_tt_session("NY")
         if near_4h_close():
             run_signals()
             check_open_trades()
