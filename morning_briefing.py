@@ -97,9 +97,9 @@ def _format_news_event(event: dict) -> str:
     try:
         dt_ldn   = datetime.fromisoformat(event["date"]).astimezone(ZoneInfo("Europe/London"))
         time_str = dt_ldn.strftime(f"%H:%M {dt_ldn.strftime('%Z')}")
-        return f"  {time_str} — {event.get('title', '—')}"
+        return f"📰 {time_str} — {event.get('title', '—')}"
     except Exception:
-        return f"  — {event.get('title', '—')}"
+        return f"📰 — {event.get('title', '—')}"
 
 
 def build_briefing_message() -> str:
@@ -133,7 +133,7 @@ def build_briefing_message() -> str:
     if news:
         news_lines = [_format_news_event(e) for e in news]
     else:
-        news_lines = ["📰 No high-impact USD events today ✅"]
+        news_lines = ["📰 No high-impact USD events today"]
 
     return "\n".join([
         "🌅 ZST DAILY BRIEFING",
