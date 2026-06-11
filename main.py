@@ -240,7 +240,8 @@ _SLOT_GENERATORS = {
     5: generate_slot5_signal,
 }
 
-_SLOT_GOLD_ONLY = {1}  # slots that only run on Gold
+_SLOT_GOLD_ONLY        = {1}  # slots that only run on Gold
+_BRIEFING_EXEMPT_SLOTS = {1}  # slots that run before the morning briefing is posted
 
 
 def run_slot(slot: int) -> None:
@@ -258,7 +259,7 @@ def run_slot(slot: int) -> None:
     if daily_counter.is_slot_fired(slot):
         logger.debug("[S%d] Already fired today — skipping.", slot)
         return
-    if not is_scan_window():
+    if slot not in _BRIEFING_EXEMPT_SLOTS and not is_scan_window():
         logger.info("[S%d] Scan blocked — briefing not posted or outside window.", slot)
         return
     if daily_counter.is_limit_reached():
