@@ -9,5 +9,8 @@ COPY . .
 
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONUTF8=1
+ENV DATA_DIR=/data
+
+RUN mkdir -p /data
 
 CMD ["python", "main.py"]

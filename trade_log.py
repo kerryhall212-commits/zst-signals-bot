@@ -7,7 +7,8 @@ import json
 import os
 from datetime import datetime, timezone
 
-_LOG_FILE = os.path.join(os.path.dirname(__file__), "trade_log.json")
+_DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(__file__))
+_LOG_FILE = os.path.join(_DATA_DIR, "trade_log.json")
 
 
 def _week_label(dt=None) -> str:

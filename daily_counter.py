@@ -9,7 +9,8 @@ import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-_COUNTER_FILE = os.path.join(os.path.dirname(__file__), "daily_counter.json")
+_DATA_DIR     = os.getenv("DATA_DIR", os.path.dirname(__file__))
+_COUNTER_FILE = os.path.join(_DATA_DIR, "daily_counter.json")
 MAX_DAILY = 6
 
 
