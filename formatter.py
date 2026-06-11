@@ -57,6 +57,31 @@ def format_tp_notification(trade: dict, level: str) -> str:
     ])
 
 
+def format_intraday_message(symbol_config: dict, signal: dict) -> str:
+    d    = 0
+    tick = symbol_config["ticker"]
+    dir_ = signal["direction"]
+    side = signal["invalidation_side"]
+
+    return "\n".join([
+        "⚡ <b>ZST INTRADAY SIGNAL</b>",
+        "",
+        f"<b>{dir_}</b> | <b>{tick}</b>",
+        f"Timeframe: 30M",
+        f"Entry: <code>{fmt(signal['entry'], d)}</code>",
+        f"SL: <code>{fmt(signal['sl'], d)}</code>",
+        f"TP1: <code>{fmt(signal['tp1'], d)}</code>",
+        f"TP2: <code>{fmt(signal['tp2'], d)}</code>",
+        f"TP3: <code>{fmt(signal['tp3'], d)}</code> 🎯",
+        "",
+        f"Reason: {signal['reason']} + momentum confirmed",
+        f"Session: {signal['session']}",
+        f"Invalidation: 30M close {side} <code>{fmt(signal['invalidation_price'], d)}</code>",
+        "",
+        "ZST Insider 🔐",
+    ])
+
+
 def format_smc_message(symbol_config: dict, signal: dict) -> str:
     d     = 0  # all prices shown as whole numbers
     title = symbol_config["signal_title"]

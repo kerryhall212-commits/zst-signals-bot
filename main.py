@@ -25,6 +25,8 @@ from textbook_tuesday import (
     is_tuesday_bst, current_session,
 )
 from morning_signal import generate_morning_signal, format_morning_signal
+from intraday_momentum import generate_intraday_signal
+from formatter import format_intraday_message
 from news_filter import is_news_blackout
 
 logging.basicConfig(
@@ -34,13 +36,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_last_signals:          dict[str, str] = {}
-_scanned_closes:        set[str]       = set()
-_review_posted_week:    str            = ""
-_briefing_posted_day:   str            = ""
-_morning_signal_day:    str            = ""
-_eod_posted_day:        str            = ""
-_tt_scanned:            set[str]       = set()   # "{date}-{session}" keys
+_last_signals:           dict[str, str] = {}
+_scanned_closes:         set[str]       = set()
+_intraday_scanned:       set[str]       = set()   # "{date}-{hour}-{half}" keys
+_last_intraday_signals:  dict[str, str] = {}
+_review_posted_week:     str            = ""
+_briefing_posted_day:    str            = ""
+_morning_signal_day:     str            = ""
+_eod_posted_day:         str            = ""
+_tt_scanned:             set[str]       = set()   # "{date}-{session}" keys
 
 _LIMIT_FOOTER = (
     "\n\n🔒 Final signal for the day.\n"
@@ -105,6 +109,27 @@ def near_friday_review() -> bool:
     """True on Friday at 20:00–20:05 BST."""
     now_bst = datetime.now(ZoneInfo("Europe/London"))
     return now_bst.weekday() == 4 and now_bst.hour == 20 and now_bst.minute < 5
+
+
+def near_30m_close() -> bool:
+    """True within the 10-minute window after each 30M candle close (XX:00 and XX:30 UTC)."""
+    now = datetime.now(timezone.utc)
+    return now.minute < 10 or 30 <= now.minute < 40
+
+
+def intraday_close_key() -> str:
+    now  = datetime.now(timezone.utc)
+    half = "30" if now.minute >= 30 else "00"
+    return f"{now.date()}-{now.hour:02d}-{half}"
+
+
+def is_intraday_session_active() -> bool:
+    """True during London 08:00–11:00 BST and NY 13:30–16:00 BST on weekdays."""
+    now_bst = datetime.now(ZoneInfo("Europe/London"))
+    if now_bst.weekday() >= 5:
+        return False
+    mins = now_bst.hour * 60 + now_bst.minute
+    return (8 * 60 <= mins < 11 * 60) or (13 * 60 + 30 <= mins < 16 * 60)
 
 
 def _tt_session_key(session: str) -> str:
@@ -235,6 +260,58 @@ def _current_week() -> str:
     return f"{iso[0]}-W{iso[1]:02d}"
 
 
+def run_intraday_signals() -> None:
+    key = intraday_close_key()
+    if key in _intraday_scanned:
+        return
+    _intraday_scanned.add(key)
+
+    logger.info("── Intraday 30M scan: %s ──", key)
+
+    if not is_scan_window():
+        logger.info("[IM] Scan blocked — briefing not posted or outside scan window.")
+        return
+
+    if daily_counter.is_limit_reached():
+        logger.info("[IM] Daily limit reached — skipping intraday scan.")
+        return
+
+    if is_news_blackout():
+        logger.info("[IM] News blackout active — skipping intraday scan.")
+        return
+
+    for sym_key, info in SYMBOLS.items():
+        if daily_counter.is_limit_reached():
+            break
+
+        signal = generate_intraday_signal(info)
+        if signal is None:
+            continue
+
+        sig_id = f"{signal['direction']}_{signal['entry']:.2f}"
+        if _last_intraday_signals.get(sym_key) == sig_id:
+            logger.info("[IM][%s] Duplicate — skipping.", sym_key)
+            continue
+
+        is_final = (daily_counter.get_count() + 1 >= daily_counter.MAX_DAILY)
+        msg = format_intraday_message(info, signal)
+        if is_final:
+            msg += _LIMIT_FOOTER
+
+        if send_message(msg):
+            count, just_hit = daily_counter.increment()
+            trade_log.record_signal(sym_key, info, signal)
+            _last_intraday_signals[sym_key] = sig_id
+            logger.info("[IM][%s] Signal posted. Daily count: %d/%d",
+                        sym_key, count, daily_counter.MAX_DAILY)
+            if just_hit:
+                daily_counter.mark_limit_notified()
+        else:
+            logger.error("[IM][%s] Send failed.", sym_key)
+
+    logger.info("── Intraday 30M scan complete ──")
+
+
 def run_signals():
     key = close_key()
     if key in _scanned_closes:
@@ -348,17 +425,21 @@ def main():
         if near_ny_open():
             run_tt_session("NY")
 
-        # ── 4. Hourly 1H close scan ───────────────────────────────────────────
+        # ── 4. Intraday 30M momentum scan (London + NY sessions) ─────────────
+        if near_30m_close() and is_intraday_session_active():
+            run_intraday_signals()
+
+        # ── 5. Hourly 1H close scan ───────────────────────────────────────────
         if near_1h_close():
             run_signals()
             check_open_trades()
 
-        # ── 5. EOD alert: 21:00 BST ───────────────────────────────────────────
+        # ── 6. EOD alert: 21:00 BST ───────────────────────────────────────────
         if near_eod_alert() and today_bst != _eod_posted_day:
             post_eod_alert()
             _eod_posted_day = today_bst
 
-        # ── 6. Friday weekly review: 20:00 BST ───────────────────────────────
+        # ── 7. Friday weekly review: 20:00 BST ───────────────────────────────
         if near_friday_review():
             week = _current_week()
             if week != _review_posted_week:

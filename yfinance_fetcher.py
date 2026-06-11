@@ -9,6 +9,8 @@ import yfinance as yf
 
 # (interval) -> (yfinance period, yfinance interval)
 _FETCH_PARAMS = {
+    "30m":   ("7d",   "30m"),  # 30-minute bars (intraday engine + DXY)
+    "30min": ("7d",   "30m"),  # TwelveData-style alias
     "1h":    ("60d",  "1h"),
     "4h":    ("60d",  "1h"),   # fetched as 1H then resampled
     "1day":  ("6mo",  "1d"),
