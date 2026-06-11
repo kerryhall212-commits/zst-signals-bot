@@ -164,6 +164,9 @@ def generate_daily_signal(symbol_config: dict) -> dict | None:
         else:
             inv_label = "1H close below SL"
 
-    return _build_signal(direction, price, pip,
-                         sl_pips, tp1_pips, tp2_pips, tp3_pips,
-                         reason_str, inv_label)
+    sig = _build_signal(direction, price, pip,
+                        sl_pips, tp1_pips, tp2_pips, tp3_pips,
+                        reason_str, inv_label)
+    if sig:
+        sig["slot"] = 6
+    return sig

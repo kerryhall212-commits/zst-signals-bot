@@ -1,18 +1,20 @@
 """
-Tracks how many signals have been sent today (UTC).
-Resets automatically at 00:00 UTC each day.
+Tracks how many signals have been sent today (BST).
+Resets automatically at 00:00 BST each day.
+Tracks per-slot firings so each slot fires at most once per day.
 """
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 _COUNTER_FILE = os.path.join(os.path.dirname(__file__), "daily_counter.json")
-MAX_DAILY = 2
+MAX_DAILY = 6
 
 
-def _today_utc() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+def _today_bst() -> str:
+    return datetime.now(ZoneInfo("Europe/London")).strftime("%Y-%m-%d")
 
 
 def _load() -> dict:
@@ -22,7 +24,7 @@ def _load() -> dict:
                 return json.load(f)
         except Exception:
             pass
-    return {"date": "", "count": 0, "limit_notified": False}
+    return {"date": "", "count": 0, "limit_notified": False, "slots_fired": []}
 
 
 def _save(data: dict) -> None:
@@ -31,9 +33,12 @@ def _save(data: dict) -> None:
 
 
 def _fresh(data: dict) -> dict:
-    """Reset counter if date has rolled over."""
-    if data["date"] != _today_utc():
-        return {"date": _today_utc(), "count": 0, "limit_notified": False}
+    """Reset counter if BST date has rolled over."""
+    today = _today_bst()
+    if data["date"] != today:
+        return {"date": today, "count": 0, "limit_notified": False, "slots_fired": []}
+    if "slots_fired" not in data:
+        data["slots_fired"] = []
     return data
 
 
@@ -61,4 +66,17 @@ def increment() -> tuple[int, bool]:
 def mark_limit_notified() -> None:
     d = _fresh(_load())
     d["limit_notified"] = True
+    _save(d)
+
+
+def is_slot_fired(slot: int) -> bool:
+    """Return True if this slot already fired today."""
+    return slot in _fresh(_load())["slots_fired"]
+
+
+def mark_slot_fired(slot: int) -> None:
+    """Record that slot fired today."""
+    d = _fresh(_load())
+    if slot not in d["slots_fired"]:
+        d["slots_fired"].append(slot)
     _save(d)

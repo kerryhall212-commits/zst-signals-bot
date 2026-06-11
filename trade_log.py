@@ -62,6 +62,7 @@ def record_signal(sym_key: str, symbol_config: dict, signal: dict) -> str:
         "tp3":             signal["tp3"],
         "rr":              signal.get("rr", "—"),
         "priority":        signal.get("priority", 3),
+        "slot":            signal.get("slot", 0),
         "reason":          signal.get("reason", ""),
         "signal_time_utc": now.isoformat(),
         "week":            _week_label(now),

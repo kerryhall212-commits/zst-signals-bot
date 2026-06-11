@@ -52,6 +52,7 @@ SYMBOLS = {
 
 # Run interval and data windows
 SCAN_INTERVAL_HOURS = 1
+M15_BARS  = 200  # 15M candles for London/NY sweep slots
 M30_BARS  = 100  # 30M candles for intraday engine
 H1_BARS   = 200  # sweep detection & Asian session
 H4_BARS   = 100  # MSS + OB

@@ -1,8 +1,21 @@
 """
-ZST Signals Bot — runs on every 4H candle close (UTC).
-4H closes: 00:00, 04:00, 08:00, 12:00, 16:00, 20:00 UTC.
-The loop checks every 5 minutes and scans only when within
-10 minutes of a 4H close, so API quota is never wasted.
+ZST Signals Bot — 6-slot SMC signal engine.
+
+Slot schedule (BST):
+  Slot 1 — Tokyo PDH/PDL Sweep   00:00–03:00  Gold only    SWING
+  Slot 2 — 6AM Continuation      06:00–07:30  Gold + US30  INTRADAY
+  Slot 3 — London Open Sweep     08:00–10:00  Gold + US30  SWING
+  Slot 4 — London Continuation   10:00–11:30  Gold + US30  INTRADAY
+  Slot 5 — NY Open Sweep         13:30–15:00  Gold + US30  SWING
+  Slot 6 — Guaranteed Daily      13:00        Gold only    INTRADAY (if <3 signals today)
+
+Plus:
+  Morning briefing  05:45 BST (weekdays)
+  Textbook Tuesday  runs at London + NY open on Tuesdays (replaces Slot 3)
+  EOD alert         21:00 BST
+  Weekly review     Friday 20:00 BST
+  1H wick sweep     every hour (existing engine, no slot tag)
+  Intraday momentum every 30M during London/NY (existing engine)
 """
 
 import logging
@@ -29,6 +42,13 @@ from intraday_momentum import generate_intraday_signal
 from daily_guaranteed import generate_daily_signal
 from news_filter import is_news_blackout
 
+# Slot engines
+from slot1_tokyo_sweep        import generate_slot1_signal
+from slot2_6am_continuation   import generate_slot2_signal
+from slot3_london_sweep       import generate_slot3_signal
+from slot4_london_continuation import generate_slot4_signal
+from slot5_ny_sweep            import generate_slot5_signal
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s  %(levelname)-8s %(message)s",
@@ -38,15 +58,18 @@ logger = logging.getLogger(__name__)
 
 _last_signals:           dict[str, str] = {}
 _scanned_closes:         set[str]       = set()
-_intraday_scanned:       set[str]       = set()   # "{date}-{hour}-{half}" keys
+_intraday_scanned:       set[str]       = set()
 _last_intraday_signals:  dict[str, str] = {}
 _review_posted_week:     str            = ""
 _briefing_posted_day:    str            = ""
 _morning_signal_day:     str            = ""
 _eod_posted_day:         str            = ""
-_tt_scanned:             set[str]       = set()   # "{date}-{session}" keys
-_daily_g_fired_day:      str            = ""      # date the guaranteed daily fired
-_daily_g_13_tried:       str            = ""      # date the 13:00 BST attempt was made
+_tt_scanned:             set[str]       = set()
+_daily_g_fired_day:      str            = ""
+_daily_g_13_tried:       str            = ""
+
+# Per-slot scan dedup keys
+_slot_scanned:           dict[int, set] = {i: set() for i in range(1, 6)}
 
 _LIMIT_FOOTER = (
     "\n\n🔒 Final signal for the day.\n"
@@ -56,10 +79,15 @@ _LIMIT_FOOTER = (
 )
 
 
+# ── Time-window helpers ────────────────────────────────────────────────────────
+
+def _bst_mins() -> int:
+    now = datetime.now(ZoneInfo("Europe/London"))
+    return now.hour * 60 + now.minute
+
+
 def near_1h_close() -> bool:
-    """Returns True during the 10-minute window after each UTC hourly candle close."""
-    now = datetime.now(timezone.utc)
-    return now.minute < 10
+    return datetime.now(timezone.utc).minute < 10
 
 
 def close_key() -> str:
@@ -67,66 +95,18 @@ def close_key() -> str:
     return f"{now.date()}-{now.hour:02d}"
 
 
-def _bst_mins() -> int:
-    now_bst = datetime.now(ZoneInfo("Europe/London"))
-    return now_bst.hour * 60 + now_bst.minute
+def near_15m_close() -> bool:
+    """True within 5 min after each 15M candle close (XX:00, XX:15, XX:30, XX:45 UTC)."""
+    return datetime.now(timezone.utc).minute % 15 < 5
 
 
-def is_briefing_window() -> bool:
-    """True on weekdays from 05:45 BST onwards (until EOD). Used for retry loop."""
-    now_bst = datetime.now(ZoneInfo("Europe/London"))
-    return now_bst.weekday() < 5 and _bst_mins() >= 5 * 60 + 45
-
-
-def is_scan_window() -> bool:
-    """True if briefing has posted today and current BST time is before 22:00."""
-    now_bst = datetime.now(ZoneInfo("Europe/London"))
-    if now_bst.weekday() >= 5:
-        return False
-    today_bst = str(now_bst.date())
-    if today_bst != _briefing_posted_day:
-        return False
-    return _bst_mins() < 22 * 60
-
-
-def near_7am_bst() -> bool:
-    """True on weekdays at 07:00–07:10 BST (5-7AM pullback confirmation window)."""
-    now_bst = datetime.now(ZoneInfo("Europe/London"))
-    return now_bst.weekday() < 5 and now_bst.hour == 7 and now_bst.minute < 10
-
-
-def near_ny_open() -> bool:
-    """True on Tuesdays at 13:30–13:40 BST (NY Open, TT check)."""
-    now_bst = datetime.now(ZoneInfo("Europe/London"))
-    return now_bst.weekday() == 1 and now_bst.hour == 13 and 30 <= now_bst.minute < 40
-
-
-def near_eod_alert() -> bool:
-    """True on weekdays at 21:00–21:10 BST."""
-    now_bst = datetime.now(ZoneInfo("Europe/London"))
-    return now_bst.weekday() < 5 and now_bst.hour == 21 and now_bst.minute < 10
-
-
-def near_friday_review() -> bool:
-    """True on Friday at 20:00–20:05 BST."""
-    now_bst = datetime.now(ZoneInfo("Europe/London"))
-    return now_bst.weekday() == 4 and now_bst.hour == 20 and now_bst.minute < 5
-
-
-def near_13_bst() -> bool:
-    """True on weekdays at 13:00–13:09 BST — daily guaranteed primary window."""
-    now_bst = datetime.now(ZoneInfo("Europe/London"))
-    return now_bst.weekday() < 5 and now_bst.hour == 13 and now_bst.minute < 10
-
-
-def near_1430_bst() -> bool:
-    """True on weekdays at 14:25–14:34 BST — daily guaranteed fallback window."""
-    now_bst = datetime.now(ZoneInfo("Europe/London"))
-    return now_bst.weekday() < 5 and now_bst.hour == 14 and 25 <= now_bst.minute < 35
+def m15_close_key() -> str:
+    now  = datetime.now(timezone.utc)
+    slot = (now.minute // 15) * 15
+    return f"{now.date()}-{now.hour:02d}-{slot:02d}"
 
 
 def near_30m_close() -> bool:
-    """True within the 10-minute window after each 30M candle close (XX:00 and XX:30 UTC)."""
     now = datetime.now(timezone.utc)
     return now.minute < 10 or 30 <= now.minute < 40
 
@@ -137,13 +117,85 @@ def intraday_close_key() -> str:
     return f"{now.date()}-{now.hour:02d}-{half}"
 
 
+def is_briefing_window() -> bool:
+    now = datetime.now(ZoneInfo("Europe/London"))
+    return now.weekday() < 5 and _bst_mins() >= 5 * 60 + 45
+
+
+def is_scan_window() -> bool:
+    now = datetime.now(ZoneInfo("Europe/London"))
+    if now.weekday() >= 5:
+        return False
+    today = str(now.date())
+    if today != _briefing_posted_day:
+        return False
+    return _bst_mins() < 22 * 60
+
+
+def near_7am_bst() -> bool:
+    now = datetime.now(ZoneInfo("Europe/London"))
+    return now.weekday() < 5 and now.hour == 7 and now.minute < 10
+
+
+def near_ny_open() -> bool:
+    now = datetime.now(ZoneInfo("Europe/London"))
+    return now.weekday() == 1 and now.hour == 13 and 30 <= now.minute < 40
+
+
+def near_eod_alert() -> bool:
+    now = datetime.now(ZoneInfo("Europe/London"))
+    return now.weekday() < 5 and now.hour == 21 and now.minute < 10
+
+
+def near_friday_review() -> bool:
+    now = datetime.now(ZoneInfo("Europe/London"))
+    return now.weekday() == 4 and now.hour == 20 and now.minute < 5
+
+
+def near_13_bst() -> bool:
+    now = datetime.now(ZoneInfo("Europe/London"))
+    return now.weekday() < 5 and now.hour == 13 and now.minute < 10
+
+
+def near_1430_bst() -> bool:
+    now = datetime.now(ZoneInfo("Europe/London"))
+    return now.weekday() < 5 and now.hour == 14 and 25 <= now.minute < 35
+
+
 def is_intraday_session_active() -> bool:
-    """True during London 08:00–11:00 BST and NY 13:30–16:00 BST on weekdays."""
+    now = datetime.now(ZoneInfo("Europe/London"))
+    if now.weekday() >= 5:
+        return False
+    m = _bst_mins()
+    return (8 * 60 <= m < 11 * 60) or (13 * 60 + 30 <= m < 16 * 60)
+
+
+def _slot_window_active(slot: int) -> bool:
+    """True if current BST time is within the given slot's window."""
+    m = _bst_mins()
     now_bst = datetime.now(ZoneInfo("Europe/London"))
     if now_bst.weekday() >= 5:
         return False
-    mins = now_bst.hour * 60 + now_bst.minute
-    return (8 * 60 <= mins < 11 * 60) or (13 * 60 + 30 <= mins < 16 * 60)
+    return {
+        1: 0       <= m < 3 * 60,
+        2: 6 * 60  <= m < 7 * 60 + 30,
+        3: 8 * 60  <= m < 10 * 60,
+        4: 10 * 60 <= m < 11 * 60 + 30,
+        5: 13 * 60 + 30 <= m < 15 * 60,
+    }.get(slot, False)
+
+
+def _slot_close_key(slot: int) -> str:
+    """Unique key per candle close per slot."""
+    if slot in (3, 5):
+        return m15_close_key()
+    return intraday_close_key()
+
+
+def _near_close_for_slot(slot: int) -> bool:
+    if slot in (3, 5):
+        return near_15m_close()
+    return near_30m_close()
 
 
 def _tt_session_key(session: str) -> str:
@@ -151,8 +203,95 @@ def _tt_session_key(session: str) -> str:
     return f"{today}-{session}"
 
 
+# ── Signal dispatch helpers ────────────────────────────────────────────────────
+
+def _post_signal(sym_key: str, info: dict, signal: dict, label: str) -> bool:
+    """Format, send, increment counter and log. Returns True on success."""
+    sig_type = signal.get("signal_type", "swing")
+    if label == "swing" or signal.get("slot") in (1, 3, 5):
+        msg = format_swing_signal(info, signal)
+    else:
+        msg = format_intraday_signal(info, signal)
+
+    is_final = (daily_counter.get_count() + 1 >= daily_counter.MAX_DAILY)
+    if is_final:
+        msg += _LIMIT_FOOTER
+
+    if not send_message(msg):
+        logger.error("[%s] Telegram send failed.", sym_key)
+        return False
+
+    count, just_hit = daily_counter.increment()
+    trade_log.record_signal(sym_key, info, signal)
+    logger.info("[%s] Signal posted (slot=%s). Daily: %d/%d",
+                sym_key, signal.get("slot", "?"), count, daily_counter.MAX_DAILY)
+    if just_hit:
+        daily_counter.mark_limit_notified()
+    return True
+
+
+# ── Slot runners ───────────────────────────────────────────────────────────────
+
+_SLOT_GENERATORS = {
+    1: generate_slot1_signal,
+    2: generate_slot2_signal,
+    3: generate_slot3_signal,
+    4: generate_slot4_signal,
+    5: generate_slot5_signal,
+}
+
+_SLOT_GOLD_ONLY = {1}  # slots that only run on Gold
+
+
+def run_slot(slot: int) -> None:
+    """Generic slot runner. Checks dedup key, slot-fired guard, news, daily limit."""
+    if not _slot_window_active(slot):
+        return
+    if not _near_close_for_slot(slot):
+        return
+
+    close_k = _slot_close_key(slot)
+    if close_k in _slot_scanned[slot]:
+        return
+    _slot_scanned[slot].add(close_k)
+
+    if daily_counter.is_slot_fired(slot):
+        logger.debug("[S%d] Already fired today — skipping.", slot)
+        return
+    if not is_scan_window():
+        logger.info("[S%d] Scan blocked — briefing not posted or outside window.", slot)
+        return
+    if daily_counter.is_limit_reached():
+        logger.info("[S%d] Daily limit reached.", slot)
+        return
+    if is_news_blackout():
+        logger.info("[S%d] News blackout — skipping.", slot)
+        return
+
+    logger.info("── Slot %d scan ──", slot)
+    gen = _SLOT_GENERATORS[slot]
+
+    for sym_key, info in SYMBOLS.items():
+        if slot in _SLOT_GOLD_ONLY and info.get("display") != "GOLD":
+            continue
+        if daily_counter.is_limit_reached():
+            break
+
+        signal = gen(info)
+        if signal is None:
+            continue
+
+        if _post_signal(sym_key, info, signal,
+                        "swing" if slot in (1, 3, 5) else "intraday"):
+            daily_counter.mark_slot_fired(slot)
+            break  # max 1 signal per slot
+
+    logger.info("── Slot %d scan complete ──", slot)
+
+
+# ── Existing engine runners ────────────────────────────────────────────────────
+
 def run_tt_session(session_override: str | None = None) -> None:
-    """Run Textbook Tuesday detection for the given (or current) session."""
     if not is_tuesday_bst():
         return
 
@@ -166,15 +305,13 @@ def run_tt_session(session_override: str | None = None) -> None:
     _tt_scanned.add(key)
 
     if not is_scan_window():
-        logger.info("[TT] Scan blocked — briefing not yet posted or outside scan window.")
+        logger.info("[TT] Scan blocked.")
         return
-
     if daily_counter.is_limit_reached():
-        logger.info("[TT] Daily limit reached — skipping %s scan.", session)
+        logger.info("[TT] Daily limit reached — skipping %s.", session)
         return
-
     if is_news_blackout():
-        logger.info("[TT] News blackout active — skipping %s scan.", session)
+        logger.info("[TT] News blackout — skipping %s.", session)
         return
 
     logger.info("── TT scan: %s session ──", session)
@@ -195,8 +332,7 @@ def run_tt_session(session_override: str | None = None) -> None:
         if send_message(msg):
             count, just_hit = daily_counter.increment()
             trade_log.record_signal(sym_key, info, signal)
-            logger.info("[TT][%s] Signal posted. Daily count: %d/%d",
-                        sym_key, count, daily_counter.MAX_DAILY)
+            logger.info("[TT][%s] Signal posted. Daily: %d/%d", sym_key, count, daily_counter.MAX_DAILY)
             if just_hit:
                 daily_counter.mark_limit_notified()
         else:
@@ -206,20 +342,17 @@ def run_tt_session(session_override: str | None = None) -> None:
 
 
 def run_morning_signal() -> None:
-    """Run the 5-7AM continuation pullback check for all symbols."""
     if not is_scan_window():
-        logger.info("[MS] Scan blocked — briefing not yet posted or outside scan window.")
+        logger.info("[MS] Scan blocked.")
         return
-
     if daily_counter.is_limit_reached():
-        logger.info("[MS] Daily limit reached — skipping morning signal.")
+        logger.info("[MS] Daily limit reached.")
         return
-
     if is_news_blackout():
-        logger.info("[MS] News blackout active — skipping morning signal.")
+        logger.info("[MS] News blackout.")
         return
 
-    logger.info("── Morning signal scan (5-7AM pullback) ──")
+    logger.info("── Morning signal scan ──")
 
     for sym_key, info in SYMBOLS.items():
         if daily_counter.is_limit_reached():
@@ -237,8 +370,7 @@ def run_morning_signal() -> None:
         if send_message(msg):
             count, just_hit = daily_counter.increment()
             trade_log.record_signal(sym_key, info, signal)
-            logger.info("[MS][%s] Signal posted. Daily count: %d/%d",
-                        sym_key, count, daily_counter.MAX_DAILY)
+            logger.info("[MS][%s] Signal posted. Daily: %d/%d", sym_key, count, daily_counter.MAX_DAILY)
             if just_hit:
                 daily_counter.mark_limit_notified()
         else:
@@ -276,8 +408,9 @@ def _current_week() -> str:
 
 def run_daily_guaranteed(ignore_news: bool = False) -> None:
     """
-    Fire one guaranteed signal per symbol if no other signal sent today.
-    ignore_news=True is used for the 14:30 fallback (news from 13:30 has cleared).
+    Slot 6 — Guaranteed daily signal at 13:00 BST.
+    Fires only if fewer than 3 signals have been sent today.
+    Gold only (aligns with spec).
     """
     global _daily_g_fired_day
 
@@ -286,28 +419,31 @@ def run_daily_guaranteed(ignore_news: bool = False) -> None:
     if today_bst == _daily_g_fired_day:
         return
 
-    if daily_counter.get_count() > 0:
-        logger.info("[DS] Signal(s) already sent today — guaranteed daily not needed.")
-        _daily_g_fired_day = today_bst  # mark satisfied so we stop checking
+    count_now = daily_counter.get_count()
+    if count_now >= 3:
+        logger.info("[S6] %d signals already sent today — guaranteed daily not needed.", count_now)
+        _daily_g_fired_day = today_bst
         return
 
     if not ignore_news and is_news_blackout():
-        logger.info("[DS] News blackout active — will retry at 14:30 BST.")
+        logger.info("[S6] News blackout — will retry at 14:30 BST.")
         return
 
     if not is_scan_window():
-        logger.info("[DS] Scan blocked — briefing not posted or outside scan window.")
+        logger.info("[S6] Scan blocked — briefing not posted or outside window.")
         return
 
-    logger.info("── Daily guaranteed signal scan ──")
+    logger.info("── Slot 6 — Guaranteed daily scan ──")
 
     for sym_key, info in SYMBOLS.items():
+        if info.get("display") != "GOLD":
+            continue  # Slot 6 is Gold only per spec
         if daily_counter.is_limit_reached():
             break
 
         signal = generate_daily_signal(info)
         if signal is None:
-            logger.info("[DS][%s] No signal generated.", sym_key)
+            logger.info("[S6][%s] No signal generated.", sym_key)
             continue
 
         is_final = (daily_counter.get_count() + 1 >= daily_counter.MAX_DAILY)
@@ -319,14 +455,15 @@ def run_daily_guaranteed(ignore_news: bool = False) -> None:
             count, just_hit = daily_counter.increment()
             trade_log.record_signal(sym_key, info, signal)
             _daily_g_fired_day = today_bst
-            logger.info("[DS][%s] Daily guaranteed posted. Daily count: %d/%d",
+            daily_counter.mark_slot_fired(6)
+            logger.info("[S6][%s] Daily guaranteed posted. Daily: %d/%d",
                         sym_key, count, daily_counter.MAX_DAILY)
             if just_hit:
                 daily_counter.mark_limit_notified()
         else:
-            logger.error("[DS][%s] Send failed.", sym_key)
+            logger.error("[S6][%s] Send failed.", sym_key)
 
-    logger.info("── Daily guaranteed scan complete ──")
+    logger.info("── Slot 6 scan complete ──")
 
 
 def run_intraday_signals() -> None:
@@ -338,15 +475,13 @@ def run_intraday_signals() -> None:
     logger.info("── Intraday 30M scan: %s ──", key)
 
     if not is_scan_window():
-        logger.info("[IM] Scan blocked — briefing not posted or outside scan window.")
+        logger.info("[IM] Scan blocked.")
         return
-
     if daily_counter.is_limit_reached():
-        logger.info("[IM] Daily limit reached — skipping intraday scan.")
+        logger.info("[IM] Daily limit reached.")
         return
-
     if is_news_blackout():
-        logger.info("[IM] News blackout active — skipping intraday scan.")
+        logger.info("[IM] News blackout.")
         return
 
     for sym_key, info in SYMBOLS.items():
@@ -371,8 +506,7 @@ def run_intraday_signals() -> None:
             count, just_hit = daily_counter.increment()
             trade_log.record_signal(sym_key, info, signal)
             _last_intraday_signals[sym_key] = sig_id
-            logger.info("[IM][%s] Signal posted. Daily count: %d/%d",
-                        sym_key, count, daily_counter.MAX_DAILY)
+            logger.info("[IM][%s] Signal posted. Daily: %d/%d", sym_key, count, daily_counter.MAX_DAILY)
             if just_hit:
                 daily_counter.mark_limit_notified()
         else:
@@ -381,30 +515,27 @@ def run_intraday_signals() -> None:
     logger.info("── Intraday 30M scan complete ──")
 
 
-def run_signals():
+def run_signals() -> None:
     key = close_key()
     if key in _scanned_closes:
         return
     _scanned_closes.add(key)
 
-    logger.info(f"── 1H close scan: {key} ──")
+    logger.info("── 1H close scan: %s ──", key)
 
     if not is_scan_window():
-        logger.info("Scan blocked — briefing not yet posted or outside scan window.")
+        logger.info("Scan blocked.")
         logger.info("── Scan complete ──")
         return
-
     if daily_counter.is_limit_reached():
-        logger.info("Daily signal limit already reached — skipping scan.")
+        logger.info("Daily limit reached.")
         logger.info("── Scan complete ──")
         return
-
     if is_news_blackout():
-        logger.info("News blackout active — skipping 4H scan.")
+        logger.info("News blackout — skipping 1H scan.")
         logger.info("── Scan complete ──")
         return
 
-    # Collect valid signals from all symbols
     candidates = []
     for sym_key, info in SYMBOLS.items():
         signal = generate_smc_signal(info)
@@ -412,7 +543,7 @@ def run_signals():
             continue
         sig_id = f"{signal['direction']}_{signal['entry']:.2f}"
         if SKIP_DUPLICATE_SIGNALS and _last_signals.get(sym_key) == sig_id:
-            logger.info(f"[{sym_key}] Duplicate — skipping.")
+            logger.info("[%s] Duplicate — skipping.", sym_key)
             continue
         candidates.append((sym_key, info, signal))
 
@@ -420,18 +551,15 @@ def run_signals():
         logger.info("── Scan complete ──")
         return
 
-    # Rank 1 (Asian sweep) first, then PDH/PDL, then PWH/PWL
     candidates.sort(key=lambda x: x[2].get("priority", 3))
-
     remaining = daily_counter.MAX_DAILY - daily_counter.get_count()
-    logger.info(f"{len(candidates)} setup(s) found, {remaining} slot(s) remaining today.")
+    logger.info("%d setup(s) found, %d slot(s) remaining.", len(candidates), remaining)
 
     for sym_key, info, signal in candidates:
         if daily_counter.is_limit_reached():
             break
 
-        priority = signal.get("priority", 3)
-        logger.info(f"[{sym_key}] Sending Rank {priority} signal.")
+        logger.info("[%s] Sending Rank %s signal.", sym_key, signal.get("priority", "?"))
 
         is_final = (daily_counter.get_count() + 1 >= daily_counter.MAX_DAILY)
         msg = format_swing_signal(info, signal)
@@ -442,82 +570,103 @@ def run_signals():
             count, just_hit = daily_counter.increment()
             trade_log.record_signal(sym_key, info, signal)
             _last_signals[sym_key] = f"{signal['direction']}_{signal['entry']:.2f}"
-            logger.info(f"[{sym_key}] Signal posted. Daily count: {count}/{daily_counter.MAX_DAILY}")
+            logger.info("[%s] Signal posted. Daily: %d/%d", sym_key, count, daily_counter.MAX_DAILY)
             if just_hit:
                 daily_counter.mark_limit_notified()
         else:
-            logger.error(f"[{sym_key}] Telegram send failed.")
+            logger.error("[%s] Telegram send failed.", sym_key)
 
     logger.info("── Scan complete ──")
 
-    # Textbook Tuesday check at each 1H close (covers Asian + London sessions)
     if is_tuesday_bst():
         run_tt_session()
 
 
+# ── Main loop ──────────────────────────────────────────────────────────────────
+
 def main():
     global _review_posted_week, _briefing_posted_day, _morning_signal_day, _eod_posted_day
 
-    logger.info("ZST Signals Bot starting (1H wick sweep engine).")
+    logger.info("ZST Signals Bot starting (6-slot SMC engine).")
 
     td_key   = os.getenv("TWELVEDATA_API_KEY")
     tg_token = os.getenv("TELEGRAM_BOT_TOKEN")
     tg_chat  = os.getenv("TELEGRAM_CHANNEL_ID")
     logger.info(
-        "Env check — TWELVEDATA_API_KEY: %s | TELEGRAM_BOT_TOKEN: %s | TELEGRAM_CHANNEL_ID: %s",
+        "Env — TWELVEDATA_API_KEY: %s | TELEGRAM_BOT_TOKEN: %s | TELEGRAM_CHANNEL_ID: %s",
         f"set ({td_key[:4]}...)" if td_key else "NOT SET",
         "set" if tg_token else "NOT SET",
         tg_chat or "NOT SET",
     )
     if not td_key:
-        logger.error("TWELVEDATA_API_KEY is missing — bot will fail on first API call.")
+        logger.error("TWELVEDATA_API_KEY missing — bot will fail on first API call.")
 
     logger.info("Entering main loop (polls every 5 min).")
     while True:
         now_bst   = datetime.now(ZoneInfo("Europe/London"))
         today_bst = str(now_bst.date())
 
-        # ── 1. Briefing: 05:45 BST — retry every poll until success ──────────
+        # ── 1. Morning briefing: 05:45 BST ───────────────────────────────
         if is_briefing_window() and today_bst != _briefing_posted_day:
             if post_morning_briefing():
                 _briefing_posted_day = today_bst
-                logger.info("Briefing posted — scanning now unlocked for today.")
+                logger.info("Briefing posted — scans unlocked.")
             else:
-                logger.warning("Briefing failed — will retry next poll. Scans remain blocked.")
+                logger.warning("Briefing failed — will retry next poll.")
 
-        # ── 2. Morning priority signal: 07:00 BST ────────────────────────────
+        # ── 2. Slot 1 — Tokyo PDH/PDL Sweep (00:00–03:00 BST, 30M) ──────
+        if _slot_window_active(1) and near_30m_close():
+            run_slot(1)
+
+        # ── 3. Slot 2 — 6AM Continuation (06:00–07:30 BST, H1) ──────────
+        if _slot_window_active(2) and near_1h_close():
+            run_slot(2)
+
+        # ── 4. Morning priority signal: 07:00 BST ────────────────────────
         if near_7am_bst() and today_bst != _morning_signal_day:
             run_morning_signal()
             _morning_signal_day = today_bst
 
-        # ── 3. TT NY session: 13:30 BST (Tuesdays only) ──────────────────────
-        if near_ny_open():
-            run_tt_session("NY")
+        # ── 5. Slot 3 — London Open Sweep (08:00–10:00 BST, 15M) ─────────
+        if _slot_window_active(3) and near_15m_close():
+            run_slot(3)
 
-        # ── 4. Daily guaranteed: 13:00 BST (primary) ─────────────────────────
+        # ── 6. Slot 4 — London Continuation (10:00–11:30 BST, 30M) ──────
+        if _slot_window_active(4) and near_30m_close():
+            run_slot(4)
+
+        # ── 7. Slot 6 — Guaranteed daily: 13:00 BST (primary) ────────────
         if near_13_bst() and today_bst != _daily_g_13_tried:
             _daily_g_13_tried = today_bst
             run_daily_guaranteed(ignore_news=False)
 
-        # ── 5. Daily guaranteed: 14:30 BST (fallback if 13:00 was news-blocked)
+        # ── 8. TT NY session: 13:30 BST (Tuesdays only) ──────────────────
+        if near_ny_open():
+            run_tt_session("NY")
+
+        # ── 9. Slot 5 — NY Open Sweep (13:30–15:00 BST, 15M) ─────────────
+        if _slot_window_active(5) and near_15m_close():
+            run_slot(5)
+
+        # ── 10. Slot 6 fallback: 14:30 BST (if 13:00 news-blocked) ───────
         if near_1430_bst() and today_bst != _daily_g_fired_day:
             run_daily_guaranteed(ignore_news=True)
 
-        # ── 6. Intraday 30M momentum scan (London + NY sessions) ─────────────
+        # ── 11. Intraday 30M scan (London + NY) ──────────────────────────
         if near_30m_close() and is_intraday_session_active():
             run_intraday_signals()
 
-        # ── 7. Hourly 1H close scan ───────────────────────────────────────────
+        # ── 12. Hourly 1H wick sweep ──────────────────────────────────────
         if near_1h_close():
             run_signals()
             check_open_trades()
 
-        # ── 8. EOD alert: 21:00 BST ───────────────────────────────────────────
+        # ── 13. EOD alert: 21:00 BST ──────────────────────────────────────
         if near_eod_alert() and today_bst != _eod_posted_day:
             post_eod_alert()
             _eod_posted_day = today_bst
 
-        # ── 9. Friday weekly review: 20:00 BST ───────────────────────────────
+        # ── 14. Friday weekly review: 20:00 BST ───────────────────────────
         if near_friday_review():
             week = _current_week()
             if week != _review_posted_week:
