@@ -32,9 +32,9 @@ from config import H1_BARS, DAY_BARS
 logger = logging.getLogger(__name__)
 
 _SESSIONS = {
-    "Asian":  {"start": (0,  0),  "end": (7,  0),  "label": "⭐⭐⭐ PREMIUM SETUP"},
-    "London": {"start": (7,  0),  "end": (11, 0),  "label": "⭐⭐ STRONG SETUP"},
-    "NY":     {"start": (13, 30), "end": (16, 0),  "label": "⭐⭐⭐ PREMIUM SETUP"},
+    "Asian":  {"start": (0,  0),  "end": (7,  0)},
+    "London": {"start": (7,  0),  "end": (11, 0)},
+    "NY":     {"start": (13, 30), "end": (16, 0)},
 }
 
 # Only scan the most recent N session bars to avoid stale entries
@@ -127,7 +127,6 @@ def generate_tt_signal(symbol_config: dict, session: str | None = None) -> dict 
 
     # Scan the most recent bars only — avoid stale entries
     recent = sess_bars.tail(_RECENCY_BARS)
-    sess_label = _SESSIONS[session]["label"]
 
     for i in range(len(recent) - 1, 0, -1):
         sweep_c   = recent.iloc[i - 1]
@@ -153,12 +152,7 @@ def generate_tt_signal(symbol_config: dict, session: str | None = None) -> dict 
             sig = _build_signal("SELL", "STRONG", entry, sl, monday_low,
                                 "Monday's High", dec, pip)
             if sig:
-                sig.update({
-                    "session":    session,
-                    "tier_label": sess_label,
-                    "sweep_label": "Monday's High",
-                    "priority":   0,
-                })
+                sig.update({"session": session, "priority": 0})
             return sig  # return even if None (rejected) — don't try other pairs
 
         # ── BULLISH: wick below Monday's Low, confirm closes bullish ───────
@@ -181,12 +175,7 @@ def generate_tt_signal(symbol_config: dict, session: str | None = None) -> dict 
             sig = _build_signal("BUY", "STRONG", entry, sl, monday_high,
                                 "Monday's Low", dec, pip)
             if sig:
-                sig.update({
-                    "session":    session,
-                    "tier_label": sess_label,
-                    "sweep_label": "Monday's Low",
-                    "priority":   0,
-                })
+                sig.update({"session": session, "priority": 0})
             return sig
 
     logger.info("[TT][%s] No valid sweep+confirm in %s session.", sym, session)
@@ -194,29 +183,5 @@ def generate_tt_signal(symbol_config: dict, session: str | None = None) -> dict 
 
 
 def format_tt_message(symbol_config: dict, signal: dict) -> str:
-    from formatter import fmt
-    d     = 0
-    title = symbol_config["signal_title"]
-    tick  = symbol_config["ticker"]
-    dir_  = signal["direction"]
-
-    return "\n".join([
-        f"🚨 <b>{title}</b>",
-        f"📅 <b>TEXTBOOK TUESDAY</b>",
-        "",
-        f"<b>{dir_}</b> | <b>{tick}</b>",
-        f"Entry: <code>{fmt(signal['entry'], d)}</code>",
-        f"SL: <code>{fmt(signal['sl'], d)}</code>",
-        f"TP1: <code>{fmt(signal['tp1'], d)}</code>",
-        f"TP2: <code>{fmt(signal['tp2'], d)}</code>",
-        f"TP3: <code>{fmt(signal['tp3'], d)}</code> ← Draw on liquidity",
-        "",
-        f"Session: {signal['session']}",
-        f"Probability: {signal['tier_label']}",
-        f"Reason: {signal['sweep_label']} swept",
-        f"Invalidation: 1H close {signal['invalidation_side']} "
-        f"<code>{fmt(signal['invalidation_price'], d)}</code>",
-        "",
-        "🎯 Swing runner — let it breathe",
-        "ZST Insider 🔐",
-    ])
+    from formatter import format_swing_signal
+    return format_swing_signal(symbol_config, signal)

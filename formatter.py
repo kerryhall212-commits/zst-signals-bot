@@ -3,9 +3,6 @@ def fmt(price: float, decimals: int = 0) -> str:
 
 
 def format_tp_notification(trade: dict, level: str) -> str:
-    """
-    level: "tp1", "tp2", "tp3", or "sl"
-    """
     display = trade.get("display", trade.get("sym_key", ""))
     dir_    = trade["direction"]
     entry   = fmt(trade["entry"])
@@ -57,41 +54,45 @@ def format_tp_notification(trade: dict, level: str) -> str:
     ])
 
 
-def format_intraday_message(symbol_config: dict, signal: dict) -> str:
+def format_swing_signal(symbol_config: dict, signal: dict) -> str:
     d    = 0
     tick = symbol_config["ticker"]
     dir_ = signal["direction"]
     side = signal["invalidation_side"]
+
+    return "\n".join([
+        "🎯 <b>ZST SWING SIGNAL</b>",
+        "",
+        f"<b>{dir_}</b> | <b>{tick}</b>",
+        f"Entry: <code>{fmt(signal['entry'], d)}</code>",
+        f"SL: <code>{fmt(signal['sl'], d)}</code>",
+        f"TP1: <code>{fmt(signal['tp1'], d)}</code>",
+        f"TP2: <code>{fmt(signal['tp2'], d)}</code>",
+        f"TP3: <code>{fmt(signal['tp3'], d)}</code>",
+        "",
+        f"Reason: {signal['reason']}",
+        f"Invalidation: 1H close {side} <code>{fmt(signal['invalidation_price'], d)}</code>",
+        "",
+        "ZST Insider 🔐",
+    ])
+
+
+def format_intraday_signal(symbol_config: dict, signal: dict) -> str:
+    d    = 0
+    tick = symbol_config["ticker"]
+    dir_ = signal["direction"]
+    side = signal["invalidation_side"]
+
+    inv_label = signal.get("inv_label")
+    if inv_label:
+        inv_line = f"Invalidation: {inv_label} <code>{fmt(signal['invalidation_price'], d)}</code>"
+    else:
+        inv_line = f"Invalidation: 30M close {side} <code>{fmt(signal['invalidation_price'], d)}</code>"
 
     return "\n".join([
         "⚡ <b>ZST INTRADAY SIGNAL</b>",
         "",
         f"<b>{dir_}</b> | <b>{tick}</b>",
-        f"Timeframe: 30M",
-        f"Entry: <code>{fmt(signal['entry'], d)}</code>",
-        f"SL: <code>{fmt(signal['sl'], d)}</code>",
-        f"TP1: <code>{fmt(signal['tp1'], d)}</code>",
-        f"TP2: <code>{fmt(signal['tp2'], d)}</code>",
-        f"TP3: <code>{fmt(signal['tp3'], d)}</code> 🎯",
-        "",
-        f"Reason: {signal['reason']} + momentum confirmed",
-        f"Session: {signal['session']}",
-        f"Invalidation: 30M close {side} <code>{fmt(signal['invalidation_price'], d)}</code>",
-        "",
-        "ZST Insider 🔐",
-    ])
-
-
-def format_daily_signal(symbol_config: dict, signal: dict) -> str:
-    d    = 0
-    tick = symbol_config["ticker"]
-    dir_ = signal["direction"]
-    side = signal["invalidation_side"]
-
-    return "\n".join([
-        "📍 <b>ZST DAILY SETUP</b>",
-        "",
-        f"<b>{dir_}</b> | <b>{tick}</b>",
         f"Entry: <code>{fmt(signal['entry'], d)}</code>",
         f"SL: <code>{fmt(signal['sl'], d)}</code>",
         f"TP1: <code>{fmt(signal['tp1'], d)}</code>",
@@ -99,41 +100,7 @@ def format_daily_signal(symbol_config: dict, signal: dict) -> str:
         f"TP3: <code>{fmt(signal['tp3'], d)}</code>",
         "",
         f"Reason: {signal['reason']}",
-        f"Invalidation: {signal['inv_label']} <code>{fmt(signal['invalidation_price'], d)}</code>",
+        inv_line,
         "",
         "ZST Insider 🔐",
     ])
-
-
-def format_smc_message(symbol_config: dict, signal: dict) -> str:
-    d     = 0  # all prices shown as whole numbers
-    title = symbol_config["signal_title"]
-    tick  = symbol_config["ticker"]
-    dir_  = signal["direction"]
-    qual  = signal.get("quality", "VALID")
-    side  = signal["invalidation_side"]   # "above" or "below"
-
-    lines = [
-        f"🚨 <b>{title}</b>",
-    ]
-
-    if qual == "STRONG":
-        lines.append("⭐️ <b>STRONG SIGNAL</b>")
-
-    lines += [
-        "",
-        f"<b>{dir_}</b> | <b>{tick}</b>",
-        f"Entry: <code>{fmt(signal['entry'], d)}</code>",
-        f"SL: <code>{fmt(signal['sl'], d)}</code>",
-        f"TP1: <code>{fmt(signal['tp1'], d)}</code>",
-        f"TP2: <code>{fmt(signal['tp2'], d)}</code>",
-        f"TP3: <code>{fmt(signal['tp3'], d)}</code>",
-        "",
-        f"R:R: {signal.get('rr', '—')}",
-        f"Reason: {signal['reason']}",
-        f"Invalidation: 1H close {side} <code>{fmt(signal['invalidation_price'], d)}</code>",
-        "",
-        "ZST Insider 🔐",
-    ]
-
-    return "\n".join(lines)

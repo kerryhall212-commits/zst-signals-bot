@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 
 from config import SYMBOLS, SKIP_DUPLICATE_SIGNALS
 from signal_engine import generate_smc_signal
-from formatter import format_smc_message
+from formatter import format_swing_signal, format_intraday_signal
 from telegram_sender import send_message
 import daily_counter
 import trade_log
@@ -27,7 +27,6 @@ from textbook_tuesday import (
 from morning_signal import generate_morning_signal, format_morning_signal
 from intraday_momentum import generate_intraday_signal
 from daily_guaranteed import generate_daily_signal
-from formatter import format_intraday_message, format_daily_signal
 from news_filter import is_news_blackout
 
 logging.basicConfig(
@@ -312,7 +311,7 @@ def run_daily_guaranteed(ignore_news: bool = False) -> None:
             continue
 
         is_final = (daily_counter.get_count() + 1 >= daily_counter.MAX_DAILY)
-        msg = format_daily_signal(info, signal)
+        msg = format_intraday_signal(info, signal)
         if is_final:
             msg += _LIMIT_FOOTER
 
@@ -364,7 +363,7 @@ def run_intraday_signals() -> None:
             continue
 
         is_final = (daily_counter.get_count() + 1 >= daily_counter.MAX_DAILY)
-        msg = format_intraday_message(info, signal)
+        msg = format_intraday_signal(info, signal)
         if is_final:
             msg += _LIMIT_FOOTER
 
@@ -435,7 +434,7 @@ def run_signals():
         logger.info(f"[{sym_key}] Sending Rank {priority} signal.")
 
         is_final = (daily_counter.get_count() + 1 >= daily_counter.MAX_DAILY)
-        msg = format_smc_message(info, signal)
+        msg = format_swing_signal(info, signal)
         if is_final:
             msg += _LIMIT_FOOTER
 

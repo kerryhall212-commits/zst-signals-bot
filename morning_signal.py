@@ -165,31 +165,10 @@ def generate_morning_signal(symbol_config: dict) -> dict | None:
     if sig:
         sig["tp2"]      = tp2
         sig["priority"] = 0
+        sig["reason"]   = "5-7AM continuation pullback — 7AM close confirmed"
     return sig
 
 
 def format_morning_signal(symbol_config: dict, signal: dict) -> str:
-    from formatter import fmt
-    d     = 0
-    title = symbol_config["signal_title"]
-    tick  = symbol_config["ticker"]
-    dir_  = signal["direction"]
-    side  = signal["invalidation_side"]
-
-    return "\n".join([
-        f"🚨 <b>{title}</b>",
-        f"⭐ <b>PRIORITY SETUP</b>",
-        "",
-        f"<b>{dir_}</b> | <b>{tick}</b>",
-        f"Entry: <code>{fmt(signal['entry'], d)}</code>",
-        f"SL: <code>{fmt(signal['sl'], d)}</code>",
-        f"TP1: <code>{fmt(signal['tp1'], d)}</code>",
-        f"TP2: <code>{fmt(signal['tp2'], d)}</code>",
-        f"TP3: <code>{fmt(signal['tp3'], d)}</code>",
-        "",
-        "Reason: 5-7AM continuation pullback",
-        "        — 7AM close confirmed",
-        f"Invalidation: 1H close {side} <code>{fmt(signal['invalidation_price'], d)}</code>",
-        "",
-        "ZST Insider 🔐",
-    ])
+    from formatter import format_swing_signal
+    return format_swing_signal(symbol_config, signal)
