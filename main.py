@@ -26,7 +26,8 @@ from textbook_tuesday import (
 )
 from morning_signal import generate_morning_signal, format_morning_signal
 from intraday_momentum import generate_intraday_signal
-from formatter import format_intraday_message
+from daily_guaranteed import generate_daily_signal
+from formatter import format_intraday_message, format_daily_signal
 from news_filter import is_news_blackout
 
 logging.basicConfig(
@@ -45,6 +46,8 @@ _briefing_posted_day:    str            = ""
 _morning_signal_day:     str            = ""
 _eod_posted_day:         str            = ""
 _tt_scanned:             set[str]       = set()   # "{date}-{session}" keys
+_daily_g_fired_day:      str            = ""      # date the guaranteed daily fired
+_daily_g_13_tried:       str            = ""      # date the 13:00 BST attempt was made
 
 _LIMIT_FOOTER = (
     "\n\n🔒 Final signal for the day.\n"
@@ -109,6 +112,18 @@ def near_friday_review() -> bool:
     """True on Friday at 20:00–20:05 BST."""
     now_bst = datetime.now(ZoneInfo("Europe/London"))
     return now_bst.weekday() == 4 and now_bst.hour == 20 and now_bst.minute < 5
+
+
+def near_13_bst() -> bool:
+    """True on weekdays at 13:00–13:09 BST — daily guaranteed primary window."""
+    now_bst = datetime.now(ZoneInfo("Europe/London"))
+    return now_bst.weekday() < 5 and now_bst.hour == 13 and now_bst.minute < 10
+
+
+def near_1430_bst() -> bool:
+    """True on weekdays at 14:25–14:34 BST — daily guaranteed fallback window."""
+    now_bst = datetime.now(ZoneInfo("Europe/London"))
+    return now_bst.weekday() < 5 and now_bst.hour == 14 and 25 <= now_bst.minute < 35
 
 
 def near_30m_close() -> bool:
@@ -258,6 +273,61 @@ def post_eod_alert() -> None:
 def _current_week() -> str:
     iso = datetime.now(timezone.utc).isocalendar()
     return f"{iso[0]}-W{iso[1]:02d}"
+
+
+def run_daily_guaranteed(ignore_news: bool = False) -> None:
+    """
+    Fire one guaranteed signal per symbol if no other signal sent today.
+    ignore_news=True is used for the 14:30 fallback (news from 13:30 has cleared).
+    """
+    global _daily_g_fired_day
+
+    today_bst = str(datetime.now(ZoneInfo("Europe/London")).date())
+
+    if today_bst == _daily_g_fired_day:
+        return
+
+    if daily_counter.get_count() > 0:
+        logger.info("[DS] Signal(s) already sent today — guaranteed daily not needed.")
+        _daily_g_fired_day = today_bst  # mark satisfied so we stop checking
+        return
+
+    if not ignore_news and is_news_blackout():
+        logger.info("[DS] News blackout active — will retry at 14:30 BST.")
+        return
+
+    if not is_scan_window():
+        logger.info("[DS] Scan blocked — briefing not posted or outside scan window.")
+        return
+
+    logger.info("── Daily guaranteed signal scan ──")
+
+    for sym_key, info in SYMBOLS.items():
+        if daily_counter.is_limit_reached():
+            break
+
+        signal = generate_daily_signal(info)
+        if signal is None:
+            logger.info("[DS][%s] No signal generated.", sym_key)
+            continue
+
+        is_final = (daily_counter.get_count() + 1 >= daily_counter.MAX_DAILY)
+        msg = format_daily_signal(info, signal)
+        if is_final:
+            msg += _LIMIT_FOOTER
+
+        if send_message(msg):
+            count, just_hit = daily_counter.increment()
+            trade_log.record_signal(sym_key, info, signal)
+            _daily_g_fired_day = today_bst
+            logger.info("[DS][%s] Daily guaranteed posted. Daily count: %d/%d",
+                        sym_key, count, daily_counter.MAX_DAILY)
+            if just_hit:
+                daily_counter.mark_limit_notified()
+        else:
+            logger.error("[DS][%s] Send failed.", sym_key)
+
+    logger.info("── Daily guaranteed scan complete ──")
 
 
 def run_intraday_signals() -> None:
@@ -425,21 +495,30 @@ def main():
         if near_ny_open():
             run_tt_session("NY")
 
-        # ── 4. Intraday 30M momentum scan (London + NY sessions) ─────────────
+        # ── 4. Daily guaranteed: 13:00 BST (primary) ─────────────────────────
+        if near_13_bst() and today_bst != _daily_g_13_tried:
+            _daily_g_13_tried = today_bst
+            run_daily_guaranteed(ignore_news=False)
+
+        # ── 5. Daily guaranteed: 14:30 BST (fallback if 13:00 was news-blocked)
+        if near_1430_bst() and today_bst != _daily_g_fired_day:
+            run_daily_guaranteed(ignore_news=True)
+
+        # ── 6. Intraday 30M momentum scan (London + NY sessions) ─────────────
         if near_30m_close() and is_intraday_session_active():
             run_intraday_signals()
 
-        # ── 5. Hourly 1H close scan ───────────────────────────────────────────
+        # ── 7. Hourly 1H close scan ───────────────────────────────────────────
         if near_1h_close():
             run_signals()
             check_open_trades()
 
-        # ── 6. EOD alert: 21:00 BST ───────────────────────────────────────────
+        # ── 8. EOD alert: 21:00 BST ───────────────────────────────────────────
         if near_eod_alert() and today_bst != _eod_posted_day:
             post_eod_alert()
             _eod_posted_day = today_bst
 
-        # ── 7. Friday weekly review: 20:00 BST ───────────────────────────────
+        # ── 9. Friday weekly review: 20:00 BST ───────────────────────────────
         if near_friday_review():
             week = _current_week()
             if week != _review_posted_week:

@@ -20,11 +20,12 @@ SYMBOLS = {
         "sl_min_from_entry": 10,  # extend SL if closer than 10 pips to entry
         "sl_max_from_entry": 15,  # reject setup if SL is more than 15 pips from entry
         "td_tz_offset": 3,
-        # Intraday momentum fixed pip levels
+        # Intraday momentum + daily guaranteed fixed pip levels
         "intraday_sl_pips":  15,
         "intraday_tp1_pips": 45,
         "intraday_tp2_pips": 60,
         "intraday_tp3_pips": 100,
+        "daily_near_pips":   50,   # proximity threshold for PWH/PWL on daily signal
     },
     "US30": {
         "data_source": "yfinance",
@@ -40,11 +41,12 @@ SYMBOLS = {
         "sl_min_from_entry": 80,      # extend SL if closer than 80 pts to entry
         "sl_max_from_entry": 120,     # reject setup if SL is more than 120 pts from entry
         "td_tz_offset": -4,
-        # Intraday momentum fixed point levels
+        # Intraday momentum + daily guaranteed fixed point levels
         "intraday_sl_pips":  50,
         "intraday_tp1_pips": 150,
         "intraday_tp2_pips": 200,
         "intraday_tp3_pips": 300,
+        "daily_near_pips":   200,  # proximity threshold for PWH/PWL on daily signal
     },
 }
 
