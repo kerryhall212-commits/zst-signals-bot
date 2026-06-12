@@ -271,7 +271,7 @@ _SLOT_SESSIONS = {
     6: "NY",
 }
 
-_SLOT_GOLD_ONLY        = {1}  # slots that only run on Gold
+_SLOT_GOLD_ONLY        = {1, 2, 3}  # US30 only fires in NY session (Slot 5)
 _BRIEFING_EXEMPT_SLOTS = {1}  # slots that run before the morning briefing is posted
 
 

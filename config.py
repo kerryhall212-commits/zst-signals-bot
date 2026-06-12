@@ -31,8 +31,8 @@ SYMBOLS = {
     },
     "US30": {
         "data_source": "yfinance",
-        "yf_symbol":   "YM=F",
-        "symbol":      "YM=F",
+        "yf_symbol":   "^DJI",
+        "symbol":      "^DJI",
         "ticker":      "US30",
         "display":     "US30",
         "signal_title": "ZST US30 SIGNAL",
