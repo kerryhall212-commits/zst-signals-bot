@@ -78,6 +78,17 @@ _LIMIT_FOOTER = (
     "Zero Stress. Always. 🙏"
 )
 
+_OB_INVALIDATION_MSG = (
+    "⚠️ <b>ZST SIGNAL UPDATE</b>\n\n"
+    "Previous signal invalidated.\n"
+    "OB broken — no entry.\n"
+    "Waiting for next setup.\n\n"
+    "ZST Insider 🔐"
+)
+
+# Tracks which slot+candle combos already posted an OB invalidation
+_ob_invalidation_posted: set[str] = set()
+
 
 # ── Time-window helpers ────────────────────────────────────────────────────────
 
@@ -275,12 +286,24 @@ def run_slot(slot: int) -> None:
     for sym_key, info in SYMBOLS.items():
         if slot in _SLOT_GOLD_ONLY and info.get("display") != "GOLD":
             continue
-        if daily_counter.is_limit_reached():
-            break
 
         signal = gen(info)
         if signal is None:
             continue
+
+        # OB invalidation — post cancellation message, don't count as signal
+        if signal.get("signal_type") == "ob_invalidated":
+            inv_key = f"inv-s{slot}-{sym_key}-{_slot_close_key(slot)}"
+            if inv_key not in _ob_invalidation_posted:
+                _ob_invalidation_posted.add(inv_key)
+                if send_message(_OB_INVALIDATION_MSG):
+                    logger.info("[S%d][%s] OB invalidation posted.", slot, sym_key)
+                else:
+                    logger.error("[S%d][%s] OB invalidation send failed.", slot, sym_key)
+            continue
+
+        if daily_counter.is_limit_reached():
+            break
 
         if _post_signal(sym_key, info, signal,
                         "swing" if slot in (1, 3, 5) else "intraday"):

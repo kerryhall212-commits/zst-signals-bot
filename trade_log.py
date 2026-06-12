@@ -61,6 +61,8 @@ def record_signal(sym_key: str, symbol_config: dict, signal: dict) -> str:
         "tp1":             signal["tp1"],
         "tp2":             signal["tp2"],
         "tp3":             signal["tp3"],
+        "tp4":             signal.get("tp4"),
+        "tp5":             signal.get("tp5"),
         "rr":              signal.get("rr", "—"),
         "priority":        signal.get("priority", 3),
         "slot":            signal.get("slot", 0),
@@ -71,6 +73,8 @@ def record_signal(sym_key: str, symbol_config: dict, signal: dict) -> str:
         "tp1_hit":         False,
         "tp2_hit":         False,
         "tp3_hit":         False,
+        "tp4_hit":         False,
+        "tp5_hit":         False,
         "sl_hit":          False,
     }
 

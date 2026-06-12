@@ -109,10 +109,8 @@ def generate_slot4_signal(symbol_config: dict) -> dict | None:
     sign = 1 if direction == "BUY" else -1
     sl   = or_low - _SL_PIPS * pip if direction == "BUY" else or_high + _SL_PIPS * pip
     risk = abs(current_close - sl)
-    # TP3 candidate at 1:4 R:R; build_signal caps at 1:6 / max_tp_pips
-    tp3c = current_close + sign * risk * 4
+    runner = current_close + sign * risk * 4
 
     reason = "London continuation — 50% OR pullback OB retest"
     logger.info("[S4][%s] %s OR_mid=%.2f Entry=%.2f SL=%.2f", sym, direction, or_mid, current_close, sl)
-    return build_signal(direction, current_close, sl, tp3c, reason, 4,
-                        max_tp_pips=symbol_config.get("max_tp_pips"))
+    return build_signal(direction, current_close, sl, runner, reason, 4)

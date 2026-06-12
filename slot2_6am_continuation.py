@@ -136,10 +136,9 @@ def generate_slot2_signal(symbol_config: dict) -> dict | None:
     sign  = 1 if direction == "BUY" else -1
     sl    = (ob_low  - _SL_PIPS * pip) if direction == "BUY" else (ob_high + _SL_PIPS * pip)
     risk  = abs(entry - sl)
-    # TP3 candidate at 1:4 R:R; build_signal will cap at 1:6 / max_tp_pips
-    tp3c  = entry + sign * risk * 4
+    # Runner candidate at 1:4; build_signal adds TP4 if >=1:4 and TP5 if >=1:5
+    runner = entry + sign * risk * 4
 
     logger.info("[S2][%s] %s OB CE=%.2f Entry=%.2f SL=%.2f", sym, direction, ce, entry, sl)
-    return build_signal(direction, entry, sl, tp3c,
-                        "6AM OB continuation — overnight move CE retest", 2,
-                        max_tp_pips=symbol_config.get("max_tp_pips"))
+    return build_signal(direction, entry, sl, runner,
+                        "6AM OB continuation — overnight move CE retest", 2)

@@ -15,18 +15,19 @@ SYMBOLS = {
         "signal_title": "ZST GOLD SIGNAL",
         "decimals": 2,
         "pip_size": 1.0,          # 1 pip = $1 on Gold
+        "pip_label": "pips",
         "min_sweep_pips": 5,
-        "sl_pips": 12,            # SL = swept level + 12 pips (default)
-        "sl_min_from_entry": 10,  # extend SL if closer than 10 pips to entry
-        "sl_max_from_entry": 15,  # reject setup if SL is more than 15 pips from entry
-        "max_tp_pips": 150,       # TPs never exceed 150 pips from entry on Gold
+        "sl_pips": 12,            # legacy — OB entry uses intraday_sl_pips
+        "sl_min_from_entry": 10,
+        "sl_max_from_entry": 15,
         "td_tz_offset": 3,
-        # Intraday momentum + daily guaranteed fixed pip levels
-        "intraday_sl_pips":  15,
-        "intraday_tp1_pips": 45,
-        "intraday_tp2_pips": 60,
-        "intraday_tp3_pips": 100,
-        "daily_near_pips":   50,   # proximity threshold for PWH/PWL on daily signal
+        # OB CE entry — fixed SL + TP structure
+        "intraday_sl_pips":  15,  # fixed SL: always 15 pips from entry
+        "entry_range_pips":   5,  # display ±5 pips entry zone
+        "intraday_tp1_pips": 15,  # 1:1
+        "intraday_tp2_pips": 30,  # 1:2
+        "intraday_tp3_pips": 45,  # 1:3
+        "daily_near_pips":   50,
     },
     "US30": {
         "data_source": "yfinance",
@@ -37,17 +38,19 @@ SYMBOLS = {
         "signal_title": "ZST US30 SIGNAL",
         "decimals":    0,
         "pip_size":    1.0,
+        "pip_label":   "pts",
         "min_sweep_pips": 20,
-        "sl_pips":     100,           # SL = swept level + 100 points (default)
-        "sl_min_from_entry": 80,      # extend SL if closer than 80 pts to entry
-        "sl_max_from_entry": 120,     # reject setup if SL is more than 120 pts from entry
+        "sl_pips":     100,
+        "sl_min_from_entry": 80,
+        "sl_max_from_entry": 120,
         "td_tz_offset": -4,
-        # Intraday momentum + daily guaranteed fixed point levels
-        "intraday_sl_pips":  50,
-        "intraday_tp1_pips": 150,
-        "intraday_tp2_pips": 200,
-        "intraday_tp3_pips": 300,
-        "daily_near_pips":   200,  # proximity threshold for PWH/PWL on daily signal
+        # OB CE entry — fixed SL + TP structure
+        "intraday_sl_pips":  100,  # fixed SL: 100 points from entry
+        "entry_range_pips":   20,  # display ±20 pts entry zone
+        "intraday_tp1_pips": 100,  # 1:1
+        "intraday_tp2_pips": 200,  # 1:2
+        "intraday_tp3_pips": 300,  # 1:3
+        "daily_near_pips":   200,
     },
 }
 

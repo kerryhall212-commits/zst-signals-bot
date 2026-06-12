@@ -2,12 +2,13 @@
 SLOT 1 — Tokyo PDH/PDL Sweep
 Time:  00:00–03:00 BST | Gold only | Max 1 signal per day
 
-30M candle wicks through PDH or PDL and closes back inside,
-then the following 30M candle confirms direction.
+30M candle wicks through PDH or PDL and closes back inside (the sweep).
+Entry at CE of the last bullish OB before the sweep (for SELL) or last
+bearish OB (for BUY). Pullback must reach CE within 2 x 30M bars.
+OB broken before CE reached → cancellation message.
 
-Entry: close of confirmation candle
-SL:    12 pips beyond the swept level
-TP1:   36 pips | TP2: 60 pips | TP3: opposite level (PDL/PDH)
+SL:    fixed 15 pips from entry (intraday_sl_pips)
+TPs:   risk × 3 / × 5 / capped at 1:6
 Label: ZST SWING SIGNAL
 """
 
@@ -19,14 +20,13 @@ from signal_engine import _fetch
 from key_levels import get_all_levels
 from slot_helpers import (
     effective_tz_offset, filter_bst_bars,
-    build_signal,
+    build_signal, sweep_ob_entry, OB_INVALIDATED,
 )
 from config import M30_BARS, H1_BARS, DAY_BARS, WEEK_BARS
 
 logger = logging.getLogger(__name__)
 
-_SL_PIPS       = 12
-_MIN_WICK_PIPS = 3  # wick must clear the level by at least 3 pips
+_MIN_WICK_PIPS = 3
 
 
 def generate_slot1_signal(symbol_config: dict) -> dict | None:
@@ -35,6 +35,7 @@ def generate_slot1_signal(symbol_config: dict) -> dict | None:
 
     sym       = symbol_config["symbol"]
     pip       = symbol_config.get("pip_size", 1.0)
+    sl_pips   = symbol_config.get("intraday_sl_pips", 15)   # fixed SL from entry
     tz_offset = effective_tz_offset(symbol_config)
 
     now_bst  = datetime.now(ZoneInfo("Europe/London"))
@@ -62,48 +63,36 @@ def generate_slot1_signal(symbol_config: dict) -> dict | None:
         return None
 
     session_bars = filter_bst_bars(m30, tz_offset, bst_date, 0, 3 * 60)
-
     if len(session_bars) < 2:
         logger.info("[S1][%s] Not enough Tokyo session bars (%d).", sym, len(session_bars))
         return None
 
-    # Scan consecutive pairs: (sweep_bar, confirm_bar)
-    for i in range(len(session_bars) - 1):
-        sweep   = session_bars[i]
-        confirm = session_bars[i + 1]
+    max_tp = symbol_config.get("max_tp_pips")
 
-        sh, sl_c, so, sc = (float(sweep[k])   for k in ("high", "low", "open", "close"))
-        _ch, _cl, co, cc = (float(confirm[k]) for k in ("high", "low", "open", "close"))
+    for direction, level, level_name, runner in [
+        ("SELL", pdh, "PDH", pdl),   # runner target = PDL (far low)
+        ("BUY",  pdl, "PDL", pdh),   # runner target = PDH (far high)
+    ]:
+        result = sweep_ob_entry(session_bars, level, direction, pip, _MIN_WICK_PIPS)
 
-        # ── BEARISH: wick above PDH, close back below ─────────────────────
-        if sh > pdh + _MIN_WICK_PIPS * pip and sc < pdh and sc < so:
-            if cc < co:  # confirm candle is bearish
-                entry    = cc
-                sl       = pdh + _SL_PIPS * pip
-                tp3_cand = pdl     # opposite level as TP3 target
+        if result == OB_INVALIDATED:
+            logger.info("[S1][%s] OB invalidated at %s.", sym, level_name)
+            return {"signal_type": "ob_invalidated", "slot": 1}
 
-                sig = build_signal("SELL", entry, sl, tp3_cand,
-                                   "Tokyo PDH sweep — 30M wick rejection", 1,
-                                   max_tp_pips=symbol_config.get("max_tp_pips"))
-                if sig:
-                    logger.info("[S1][%s] SELL — PDH %.2f swept. Entry=%.2f SL=%.2f",
-                                sym, pdh, entry, sl)
-                    return sig
+        if not isinstance(result, dict):
+            continue
 
-        # ── BULLISH: wick below PDL, close back above ─────────────────────
-        if sl_c < pdl - _MIN_WICK_PIPS * pip and sc > pdl and sc > so:
-            if cc > co:  # confirm candle is bullish
-                entry    = cc
-                sl       = pdl - _SL_PIPS * pip
-                tp3_cand = pdh     # opposite level as TP3 target
+        entry = result["entry"]
+        sign  = 1 if direction == "BUY" else -1
+        sl    = entry + sign * sl_pips * pip  # fixed SL from entry
 
-                sig = build_signal("BUY", entry, sl, tp3_cand,
-                                   "Tokyo PDL sweep — 30M wick rejection", 1,
-                                   max_tp_pips=symbol_config.get("max_tp_pips"))
-                if sig:
-                    logger.info("[S1][%s] BUY — PDL %.2f swept. Entry=%.2f SL=%.2f",
-                                sym, pdl, entry, sl)
-                    return sig
+        sig = build_signal(direction, entry, sl, runner,
+                           f"Tokyo {level_name} sweep — OB CE entry", 1,
+                           max_tp_pips=max_tp)
+        if sig:
+            logger.info("[S1][%s] %s — %s swept. Entry=%.2f SL=%.2f",
+                        sym, direction, level_name, entry, sl)
+            return sig
 
     logger.info("[S1][%s] No Tokyo PDH/PDL sweep pattern.", sym)
     return None
