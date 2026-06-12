@@ -37,11 +37,13 @@ def filter_bst_bars(df, tz_offset: int, bst_date, start_mins: int, end_mins: int
 
 def build_signal(direction: str, entry: float, sl: float,
                  runner_candidate: float | None, reason: str, slot_num: int,
-                 max_tp_pips: float | None = None) -> dict | None:
+                 max_tp_pips: float | None = None,
+                 force_runner: bool = False) -> dict | None:
     """
     Standard TPs: TP1=1:1, TP2=1:2, TP3=1:3 (always).
-    Runner TPs: TP4=1:5 added if runner_candidate >= 1:4 R:R away.
+    Runner TPs: TP4=1:5 added if runner_candidate >= 1:4 R:R away, OR force_runner=True.
                 TP5=1:6 added if runner_candidate >= 1:5 R:R away.
+    force_runner=True: Tuesday Monday H/L sweep — minimum 1:5 target.
     Returns None if risk == 0.
     """
     risk = abs(entry - sl)
@@ -57,10 +59,12 @@ def build_signal(direction: str, entry: float, sl: float,
     tp4 = tp5 = None
     if runner_candidate is not None:
         runner_rr = abs(runner_candidate - entry) / risk
-        if runner_rr >= 4:
+        if runner_rr >= 4 or force_runner:
             tp4 = entry + sign * risk * 5
         if runner_rr >= 5:
             tp5 = entry + sign * risk * 6
+    elif force_runner:
+        tp4 = entry + sign * risk * 5
 
     if max_tp_pips is not None:
         def _cap(tp: float) -> float:
