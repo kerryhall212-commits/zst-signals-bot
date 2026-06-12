@@ -2,13 +2,13 @@
 SLOT 1 — Tokyo PDH/PDL Sweep
 Time:  00:00–03:00 BST | Gold only | Max 1 signal per day
 
-30M candle wicks through PDH or PDL and closes back inside (the sweep).
-Entry at CE of the last bullish OB before the sweep (for SELL) or last
-bearish OB (for BUY). Pullback must reach CE within 2 x 30M bars.
-OB broken before CE reached → cancellation message.
+1H candle wicks above PDH (or below PDL) and closes back inside (liquidity
+sweep + reclaim). OB = last bullish 1H candle before the sweep (for SELL)
+or last bearish 1H candle (for BUY). Entry on pullback to OB CE within 2
+x 1H bars. OB broken before CE reached → cancellation message.
 
 SL:    fixed 15 pips from entry (intraday_sl_pips)
-TPs:   risk × 3 / × 5 / capped at 1:6
+TPs:   1:1 / 1:2 / 1:3 + optional runners
 Label: ZST SWING SIGNAL
 """
 
@@ -22,7 +22,7 @@ from slot_helpers import (
     effective_tz_offset, filter_bst_bars,
     build_signal, sweep_ob_entry, OB_INVALIDATED,
 )
-from config import M30_BARS, H1_BARS, DAY_BARS, WEEK_BARS
+from config import H1_BARS, DAY_BARS, WEEK_BARS
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +46,9 @@ def generate_slot1_signal(symbol_config: dict) -> dict | None:
         return None
 
     try:
-        m30    = _fetch(symbol_config, "30min", M30_BARS)
+        h1     = _fetch(symbol_config, "1h",    H1_BARS)
         weekly = _fetch(symbol_config, "1week", WEEK_BARS)
         daily  = _fetch(symbol_config, "1day",  DAY_BARS)
-        h1     = _fetch(symbol_config, "1h",    H1_BARS)
     except Exception as e:
         logger.error("[S1][%s] Fetch failed: %s", sym, e)
         return None
@@ -62,7 +61,7 @@ def generate_slot1_signal(symbol_config: dict) -> dict | None:
         logger.info("[S1][%s] PDH/PDL unavailable.", sym)
         return None
 
-    session_bars = filter_bst_bars(m30, tz_offset, bst_date, 0, 3 * 60)
+    session_bars = filter_bst_bars(h1, tz_offset, bst_date, 0, 3 * 60)
     if len(session_bars) < 2:
         logger.info("[S1][%s] Not enough Tokyo session bars (%d).", sym, len(session_bars))
         return None

@@ -638,8 +638,8 @@ def main():
             else:
                 logger.warning("Briefing failed — will retry next poll.")
 
-        # ── 2. Slot 1 — Tokyo PDH/PDL Sweep (00:00–03:00 BST, 30M) ──────
-        if _slot_window_active(1) and near_30m_close():
+        # ── 2. Slot 1 — Tokyo PDH/PDL Sweep (00:00–03:00 BST, 1H) ───────
+        if _slot_window_active(1) and near_1h_close():
             run_slot(1)
 
         # ── 3. Slot 2 — 6AM Continuation (06:00–07:30 BST, H1) ──────────
