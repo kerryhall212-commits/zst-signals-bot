@@ -2,13 +2,16 @@
 SLOT 3 — London Opening Range Breakout (ORB)
 Time:  08:00–12:30 BST | Gold only | Max 1 signal per day
 
-Range = high/low of 08:00–09:00 BST 1H candle.
-If range < 15 pips, extend to cover 09:00–10:00 BST candle too.
-Breakout = 5M candle close BEYOND the range (not just a wick).
-Entry     = first 5M close that pulls back slightly toward range
-            (still outside range, lower than breakout close for BUY).
-SL = range boundary - 5 pips (skip if risk > intraday_sl_pips from entry).
-TPs: 1:1 / 1:2 / 1:3 + runners if key level beyond 1:4 R:R away.
+Range  = high/low of 08:00–09:00 BST 1H candle.
+         If < 15 pips, extend to 09:00–10:00 BST candle.
+Break  = first 5M candle close BEYOND the range.
+Entry  = wick rejection candle after the breakout:
+           • wick dips back toward (or into) the range boundary
+           • candle CLOSES on the breakout side of the range
+           • wick ≥ 3 pips AND ≥ 30% of the bar range (volume proxy)
+           • volume ≥ average of the last 10 post-range bars (if available)
+SL     = range boundary ± 5 pips (skip if risk > intraday_sl_pips).
+TPs    = 1:1 / 1:2 / 1:3 + runners.
 """
 
 import logging
@@ -25,9 +28,59 @@ from config import M5_BARS, H1_BARS, DAY_BARS, WEEK_BARS
 
 logger = logging.getLogger(__name__)
 
-_MIN_RANGE_PIPS = 15
-_SL_BUFFER_PIPS = 5
-_SLOT_END_MINS  = 12 * 60 + 30   # 12:30 BST
+_MIN_RANGE_PIPS    = 15
+_SL_BUFFER_PIPS    = 5
+_SLOT_END_MINS     = 12 * 60 + 30   # 12:30 BST
+_MIN_WICK_PIPS     = 3              # minimum wick size to count as rejection
+_MIN_WICK_RATIO    = 0.30           # wick must be ≥ 30% of total candle range
+_VOL_LOOKBACK      = 10             # bars used to compute average volume
+
+
+def _wick_rejection(bar, direction: str, range_high: float, range_low: float,
+                    breakout_close: float, pip: float) -> bool:
+    """
+    True when the bar shows a wick rejection of the range after a breakout.
+
+    BUY:  wick dips back toward/into range (low < breakout_close),
+          close holds above range_high.
+    SELL: wick spikes back toward/into range (high > breakout_close),
+          close holds below range_low.
+    Wick must be ≥ _MIN_WICK_PIPS AND ≥ _MIN_WICK_RATIO of total bar range.
+    """
+    lo, hi, cl = float(bar["low"]), float(bar["high"]), float(bar["close"])
+    rng = hi - lo
+    if rng < pip:
+        return False
+
+    if direction == "BUY":
+        wick = cl - lo                          # lower wick (body bottom to low)
+        if lo >= breakout_close:                # no dip back
+            return False
+        if cl <= range_high:                    # close fell back inside range
+            return False
+    else:
+        wick = hi - cl                          # upper wick (body top to high)
+        if hi <= breakout_close:                # no spike back
+            return False
+        if cl >= range_low:                     # close rose back inside range
+            return False
+
+    return wick >= _MIN_WICK_PIPS * pip and wick / rng >= _MIN_WICK_RATIO
+
+
+def _vol_confirms(bar, post_bars: list) -> bool:
+    """True if bar's volume ≥ average of last _VOL_LOOKBACK post-range bars."""
+    try:
+        bar_vol = float(bar.get("volume", 0))
+        if bar_vol == 0:
+            return True  # no volume data → fail-open
+        vols = [float(b.get("volume", 0)) for b in post_bars[-_VOL_LOOKBACK:]
+                if float(b.get("volume", 0)) > 0]
+        if not vols:
+            return True
+        return bar_vol >= sum(vols) / len(vols)
+    except Exception:
+        return True
 
 
 def generate_slot3_signal(symbol_config: dict) -> dict | None:
@@ -115,33 +168,38 @@ def generate_slot3_signal(symbol_config: dict) -> dict | None:
                     sym, float(post_bars[-1]["close"]), range_low, range_high)
         return None
 
-    # ── 3. Pullback confirmation ────────────────────────────────────────────────
-    # After the breakout bar, wait for a 5M bar that:
-    #   BUY:  closes BELOW the breakout close but ABOVE range_high
-    #   SELL: closes ABOVE the breakout close but BELOW range_low
-    breakout_close = float(breakout_bar["close"])
-    entry_close    = None
+    # ── 3. Wick rejection + volume confirmation ────────────────────────────────
+    # After the breakout bar, find the first 5M bar that:
+    #   • wick dips back toward/into the range (the "pull back")
+    #   • close holds on the breakout side (the "rejection")
+    #   • wick ≥ 3 pips AND ≥ 30% of bar range (volume proxy)
+    #   • volume ≥ average of post-range bars (if volume data available)
+    breakout_close  = float(breakout_bar["close"])
+    rejection_bar   = None
 
     for bar in post_bars[breakout_idx + 1:]:
-        c = float(bar["close"])
-        if direction == "BUY"  and range_high < c < breakout_close:
-            entry_close = c
-            break
-        if direction == "SELL" and breakout_close < c < range_low:
-            entry_close = c
-            break
+        if not _wick_rejection(bar, direction, range_high, range_low,
+                               breakout_close, pip):
+            continue
+        if not _vol_confirms(bar, post_bars):
+            logger.info("[S3][%s] Wick rejection found but volume below avg — skip bar.",
+                        sym)
+            continue
+        rejection_bar = bar
+        break
 
-    if entry_close is None:
-        logger.info("[S3][%s] %s breakout %.2f confirmed — waiting for pullback.",
+    if rejection_bar is None:
+        logger.info("[S3][%s] %s breakout %.2f — waiting for wick rejection pullback.",
                     sym, direction, breakout_close)
         return None
 
-    entry = entry_close
+    entry = float(rejection_bar["close"])
+    logger.info("[S3][%s] %s wick rejection confirmed. Entry=%.2f (breakout=%.2f)",
+                sym, direction, entry, breakout_close)
 
     # ── 4. SL + risk check ──────────────────────────────────────────────────────
-    sign  = 1 if direction == "BUY" else -1
-    sl    = (range_low  - _SL_BUFFER_PIPS * pip) if direction == "BUY" \
-             else (range_high + _SL_BUFFER_PIPS * pip)
+    sl = (range_low  - _SL_BUFFER_PIPS * pip) if direction == "BUY" \
+          else (range_high + _SL_BUFFER_PIPS * pip)
     risk_pips = abs(entry - sl) / pip
 
     if risk_pips > max_sl:

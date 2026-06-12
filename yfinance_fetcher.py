@@ -61,6 +61,8 @@ def fetch_ohlcv_yf(symbol: str, interval: str, outputsize: int = 100) -> pd.Data
             break
 
     df["time"] = df["time"].astype(str)
-    df = df[["time", "open", "high", "low", "close"]]
+    if "volume" not in df.columns:
+        df["volume"] = 0
+    df = df[["time", "open", "high", "low", "close", "volume"]]
     df = df.sort_values("time").tail(outputsize).reset_index(drop=True)
     return df

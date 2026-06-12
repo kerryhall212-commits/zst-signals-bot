@@ -43,6 +43,10 @@ def fetch_ohlcv(symbol: str, interval: str = "1h", outputsize: int = 100) -> pd.
             df = df.rename(columns={"datetime": "time"})
             for col in ("open", "high", "low", "close"):
                 df[col] = pd.to_numeric(df[col])
+            if "volume" in df.columns:
+                df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0)
+            else:
+                df["volume"] = 0
             df = df.sort_values("time").reset_index(drop=True)
             return df
 
