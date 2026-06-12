@@ -25,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 from config import SYMBOLS, SKIP_DUPLICATE_SIGNALS
 from signal_engine import generate_smc_signal
-from formatter import format_swing_signal, format_intraday_signal, format_london_signal
+from formatter import format_swing_signal, format_intraday_signal, format_london_signal, format_us30_signal
 from telegram_sender import send_message
 import daily_counter
 import trade_log
@@ -212,7 +212,10 @@ def _tt_session_key(session: str) -> str:
 
 def _post_signal(sym_key: str, info: dict, signal: dict, label: str) -> bool:
     """Format, send, increment counter and log. Returns True on success."""
-    if signal.get("signal_type") == "london_orb":
+    sig_type = signal.get("signal_type", "")
+    if sig_type == "us30_ny":
+        msg = format_us30_signal(info, signal)
+    elif sig_type == "london_orb":
         msg = format_london_signal(info, signal)
     elif label == "swing" or signal.get("slot") in (1, 5):
         msg = format_swing_signal(info, signal)

@@ -1,15 +1,9 @@
 """
-SLOT 5 — NY Open Sweep
-Time:  13:30–15:00 BST | Gold + US30 | Max 1 signal per day
+SLOT 5 — NY Open Sweep (Gold) + US30 NY Engine
 
-London High/Low (08:00–13:30 BST) or PDH/PDL swept at NY open.
-OB identified (last bullish candle before sweep for SELL, bearish for BUY).
-Entry at CE of OB when price pulls back into OB zone (within 2 x 15M bars).
-OB broken before entry → cancellation message.
-
-SL:    fixed intraday_sl_pips from entry (15 Gold / 50 US30)
-TPs:   risk × 3 / × 5 / capped at 1:6
-Label: ZST SWING SIGNAL
+Gold:  London H/L or PDH/PDL swept at NY open → OB CE entry.
+US30:  3 setups via slot_us30_ny (PDH/PDL sweep, Asian range sweep, B&R).
+       US30 only fires 13:30–21:00 BST (NY session).
 """
 
 import logging
@@ -24,6 +18,7 @@ from slot_helpers import (
     fetch_dxy, dxy_confirms,
 )
 from config import M15_BARS, H1_BARS, DAY_BARS, WEEK_BARS
+from slot_us30_ny import generate_us30_ny_signal
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +30,9 @@ def _session_high_low(bars: list) -> tuple[float, float]:
 
 
 def generate_slot5_signal(symbol_config: dict) -> dict | None:
+    if symbol_config.get("display") == "US30":
+        return generate_us30_ny_signal(symbol_config)
+
     sym       = symbol_config["symbol"]
     pip       = symbol_config.get("pip_size", 1.0)
     sl_pips   = symbol_config.get("intraday_sl_pips", 15)

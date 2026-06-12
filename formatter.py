@@ -98,6 +98,41 @@ def format_swing_signal(symbol_config: dict, signal: dict) -> str:
     return "\n".join(lines)
 
 
+def format_us30_signal(symbol_config: dict, signal: dict) -> str:
+    d           = 0
+    tick        = symbol_config["ticker"]
+    dir_        = signal["direction"]
+    side        = signal["invalidation_side"]
+    pip         = symbol_config.get("pip_size", 1.0)
+    pip_label   = symbol_config.get("pip_label", "points")
+    entry_range = symbol_config.get("entry_range_pips", 20)
+    risk_pts    = round(abs(signal["sl"] - signal["entry"]) / pip)
+
+    lines = [
+        "🎯 <b>ZST US30 SIGNAL</b>",
+        "",
+        f"<b>{dir_}</b> | <b>{tick}</b>",
+        f"Entry: <code>{fmt(signal['entry'], d)}</code> (±{entry_range} {pip_label})",
+        f"SL: <code>{fmt(signal['sl'], d)}</code> ({risk_pts} {pip_label})",
+        f"TP1: <code>{fmt(signal['tp1'], d)}</code> (1:1)",
+        f"TP2: <code>{fmt(signal['tp2'], d)}</code> (1:2)",
+        f"TP3: <code>{fmt(signal['tp3'], d)}</code> (1:3)",
+    ]
+    if "tp4" in signal:
+        lines.append(f"TP4: <code>{fmt(signal['tp4'], d)}</code> (1:5) — runner")
+    if "tp5" in signal:
+        lines.append(f"TP5: <code>{fmt(signal['tp5'], d)}</code> (1:6) — runner")
+
+    lines += ["", f"Reason: {signal['reason']}"]
+    lines += _session_lines(signal)
+    lines += [
+        f"Invalidation: Close {side} <code>{fmt(signal['invalidation_price'], d)}</code>",
+        "",
+        "ZST Insider 🔐",
+    ]
+    return "\n".join(lines)
+
+
 def format_london_signal(symbol_config: dict, signal: dict) -> str:
     d           = 0
     tick        = symbol_config["ticker"]
