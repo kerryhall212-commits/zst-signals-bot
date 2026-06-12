@@ -66,6 +66,22 @@ _tt_scanned:             set[str]       = set()
 _daily_g_fired_day:      str            = ""
 _daily_g_13_tried:       str            = ""
 
+_BRIEFING_LOCK_FILE = "briefing_sent_today.txt"
+
+
+def _briefing_lock_exists(today: str) -> bool:
+    """Returns True if briefing was already sent today (survives restarts)."""
+    try:
+        with open(_BRIEFING_LOCK_FILE, "r") as f:
+            return f.read().strip() == today
+    except FileNotFoundError:
+        return False
+
+
+def _write_briefing_lock(today: str) -> None:
+    with open(_BRIEFING_LOCK_FILE, "w") as f:
+        f.write(today)
+
 # Per-slot scan dedup keys
 _slot_scanned:           dict[int, set] = {i: set() for i in range(1, 6)}
 
@@ -666,7 +682,11 @@ def main():
 
         # ── 1. Morning briefing: 05:45 BST ───────────────────────────────
         if is_briefing_window() and today_bst != _briefing_posted_day:
-            if post_morning_briefing():
+            if _briefing_lock_exists(today_bst):
+                _briefing_posted_day = today_bst  # sync in-memory with file lock
+                logger.info("Briefing lock file found — already sent today, skipping.")
+            elif post_morning_briefing():
+                _write_briefing_lock(today_bst)
                 _briefing_posted_day = today_bst
                 logger.info("Briefing posted — scans unlocked.")
             else:
