@@ -4,8 +4,7 @@ ZST Signals Bot — 6-slot SMC signal engine.
 Slot schedule (BST):
   Slot 1 — Tokyo PDH/PDL Sweep   00:00–03:00  Gold only    SWING
   Slot 2 — 6AM Continuation      06:00–07:30  Gold + US30  INTRADAY
-  Slot 3 — London Open Sweep     08:00–10:00  Gold + US30  SWING
-  Slot 4 — London Continuation   10:00–11:30  Gold + US30  INTRADAY
+  Slot 3 — London ORB             08:00–11:00  Gold + US30  LONDON
   Slot 5 — NY Open Sweep         13:30–15:00  Gold + US30  SWING
   Slot 6 — Guaranteed Daily      13:00        Gold only    INTRADAY (if <3 signals today)
 
@@ -26,7 +25,7 @@ from zoneinfo import ZoneInfo
 
 from config import SYMBOLS, SKIP_DUPLICATE_SIGNALS
 from signal_engine import generate_smc_signal
-from formatter import format_swing_signal, format_intraday_signal
+from formatter import format_swing_signal, format_intraday_signal, format_london_signal
 from telegram_sender import send_message
 import daily_counter
 import trade_log
@@ -43,11 +42,10 @@ from daily_guaranteed import generate_daily_signal
 from news_filter import is_news_blackout
 
 # Slot engines
-from slot1_tokyo_sweep        import generate_slot1_signal
-from slot2_6am_continuation   import generate_slot2_signal
-from slot3_london_sweep       import generate_slot3_signal
-from slot4_london_continuation import generate_slot4_signal
-from slot5_ny_sweep            import generate_slot5_signal
+from slot1_tokyo_sweep      import generate_slot1_signal
+from slot2_6am_continuation import generate_slot2_signal
+from slot3_london_sweep     import generate_slot3_signal
+from slot5_ny_sweep         import generate_slot5_signal
 
 logging.basicConfig(
     level=logging.INFO,
@@ -187,8 +185,7 @@ def _slot_window_active(slot: int) -> bool:
     return {
         1: 0             <= m < 5 * 60 + 45,   # 00:00–05:44 Tokyo
         2: 5 * 60 + 45   <= m < 8 * 60,         # 05:45–07:59 Pre-London
-        3: 8 * 60        <= m < 10 * 60,         # 08:00–09:59 London Open
-        4: 10 * 60       <= m < 13 * 60,         # 10:00–12:59 London
+        3: 8 * 60        <= m < 11 * 60,         # 08:00–10:59 London ORB
         5: 13 * 60       <= m < 16 * 60,         # 13:00–15:59 NY
     }.get(slot, False)
 
@@ -215,8 +212,9 @@ def _tt_session_key(session: str) -> str:
 
 def _post_signal(sym_key: str, info: dict, signal: dict, label: str) -> bool:
     """Format, send, increment counter and log. Returns True on success."""
-    sig_type = signal.get("signal_type", "swing")
-    if label == "swing" or signal.get("slot") in (1, 3, 5):
+    if signal.get("signal_type") == "london_orb":
+        msg = format_london_signal(info, signal)
+    elif label == "swing" or signal.get("slot") in (1, 5):
         msg = format_swing_signal(info, signal)
     else:
         msg = format_intraday_signal(info, signal)
@@ -244,15 +242,13 @@ _SLOT_GENERATORS = {
     1: generate_slot1_signal,
     2: generate_slot2_signal,
     3: generate_slot3_signal,
-    4: generate_slot4_signal,
     5: generate_slot5_signal,
 }
 
 _SLOT_SESSIONS = {
     1: "Tokyo",
     2: "Pre-London",
-    3: "London Open",
-    4: "London",
+    3: "London ORB",
     5: "NY",
     6: "NY",
 }
@@ -316,7 +312,7 @@ def run_slot(slot: int) -> None:
             break
 
         if _post_signal(sym_key, info, signal,
-                        "swing" if slot in (1, 3, 5) else "intraday"):
+                        "swing" if slot in (1, 5) else "intraday"):
             daily_counter.mark_slot_fired(slot)
             break  # max 1 signal per slot
 
@@ -666,13 +662,9 @@ def main():
         if _slot_window_active(2) and near_1h_close():
             run_slot(2)
 
-        # ── 4. Slot 3 — London Open (08:00–09:59 BST, 15M) ──────────────
+        # ── 4. Slot 3 — London ORB (08:00–10:59 BST, 15M) ───────────────
         if _slot_window_active(3) and near_15m_close():
             run_slot(3)
-
-        # ── 5. Slot 4 — London (10:00–12:59 BST, 30M) ───────────────────
-        if _slot_window_active(4) and near_30m_close():
-            run_slot(4)
 
         # ── 6. Slot 6 — Guaranteed daily: 13:00 BST (primary) ────────────
         if near_13_bst() and today_bst != _daily_g_13_tried:
