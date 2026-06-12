@@ -640,9 +640,15 @@ def main():
         logger.error("TWELVEDATA_API_KEY missing — bot will fail on first API call.")
 
     logger.info("Entering main loop (polls every 5 min).")
+    _heartbeat_hour = -1
     while True:
         now_bst   = datetime.now(ZoneInfo("Europe/London"))
         today_bst = str(now_bst.date())
+
+        if now_bst.hour != _heartbeat_hour:
+            _heartbeat_hour = now_bst.hour
+            logger.info("Heartbeat %s BST | signals today: %d",
+                        now_bst.strftime("%H:%M"), daily_counter.get_count())
 
         # ── 1. Morning briefing: 05:45 BST ───────────────────────────────
         if is_briefing_window() and today_bst != _briefing_posted_day:
