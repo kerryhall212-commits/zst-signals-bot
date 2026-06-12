@@ -104,6 +104,17 @@ def close_key() -> str:
     return f"{now.date()}-{now.hour:02d}"
 
 
+def near_5m_close() -> bool:
+    """True at every 5-minute boundary — aligns with the 5-minute poll interval."""
+    return True
+
+
+def m5_close_key() -> str:
+    now  = datetime.now(timezone.utc)
+    slot = (now.minute // 5) * 5
+    return f"{now.date()}-{now.hour:02d}-{slot:02d}"
+
+
 def near_15m_close() -> bool:
     """True within 5 min after each 15M candle close (XX:00, XX:15, XX:30, XX:45 UTC)."""
     return datetime.now(timezone.utc).minute % 15 < 5
@@ -185,20 +196,24 @@ def _slot_window_active(slot: int) -> bool:
     return {
         1: 0             <= m < 5 * 60 + 45,   # 00:00–05:44 Tokyo
         2: 5 * 60 + 45   <= m < 8 * 60,         # 05:45–07:59 Pre-London
-        3: 8 * 60        <= m < 11 * 60,         # 08:00–10:59 London ORB
+        3: 8 * 60        <= m < 12 * 60 + 30,      # 08:00–12:29 London ORB
         5: 13 * 60       <= m < 16 * 60,         # 13:00–15:59 NY
     }.get(slot, False)
 
 
 def _slot_close_key(slot: int) -> str:
     """Unique key per candle close per slot."""
-    if slot in (3, 5):
+    if slot == 3:
+        return m5_close_key()
+    if slot == 5:
         return m15_close_key()
     return intraday_close_key()
 
 
 def _near_close_for_slot(slot: int) -> bool:
-    if slot in (3, 5):
+    if slot == 3:
+        return near_5m_close()
+    if slot == 5:
         return near_15m_close()
     return near_30m_close()
 
@@ -665,8 +680,8 @@ def main():
         if _slot_window_active(2) and near_1h_close():
             run_slot(2)
 
-        # ── 4. Slot 3 — London ORB (08:00–10:59 BST, 15M) ───────────────
-        if _slot_window_active(3) and near_15m_close():
+        # ── 4. Slot 3 — London ORB (08:00–12:29 BST, 5M) ────────────────
+        if _slot_window_active(3) and near_5m_close():
             run_slot(3)
 
         # ── 6. Slot 6 — Guaranteed daily: 13:00 BST (primary) ────────────
