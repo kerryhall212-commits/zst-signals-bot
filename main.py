@@ -137,10 +137,7 @@ def is_scan_window() -> bool:
     now = datetime.now(ZoneInfo("Europe/London"))
     if now.weekday() >= 5:
         return False
-    today = str(now.date())
-    if today != _briefing_posted_day:
-        return False
-    return _bst_mins() < 22 * 60
+    return 5 * 60 + 45 <= _bst_mins() < 22 * 60
 
 
 def near_7am_bst() -> bool:
