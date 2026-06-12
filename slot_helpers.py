@@ -36,9 +36,13 @@ def filter_bst_bars(df, tz_offset: int, bst_date, start_mins: int, end_mins: int
 
 
 def build_signal(direction: str, entry: float, sl: float,
-                 tp1: float, tp2: float, tp3_candidate: float,
-                 reason: str, slot_num: int) -> dict | None:
-    """R:R enforced: 1:3 minimum, 1:6 cap. Returns None if below 1:3."""
+                 tp3_candidate: float, reason: str, slot_num: int,
+                 max_tp_pips: float | None = None) -> dict | None:
+    """
+    TP1 = risk×3, TP2 = risk×5, TP3 = key level capped at 1:6.
+    Optional max_tp_pips absolute cap (e.g. 150 for Gold).
+    Returns None if tp3_candidate gives < 1:3 R:R.
+    """
     risk = abs(entry - sl)
     if risk == 0:
         return None
@@ -50,12 +54,24 @@ def build_signal(direction: str, entry: float, sl: float,
         logger.info("[S%d] R:R %.2f below 1:3 — rejected.", slot_num, rr_raw)
         return None
 
+    tp1 = entry + sign * risk * 3
+    tp2 = entry + sign * risk * 5
+
     if rr_raw > 6:
         tp3      = entry + sign * risk * 6
         rr_label = "1:6"
     else:
         tp3      = tp3_candidate
         rr_label = f"1:{rr_raw:.0f}"
+
+    # Absolute pip cap per symbol (Gold: 150 pips)
+    if max_tp_pips is not None:
+        def _cap(tp: float) -> float:
+            return (entry + sign * max_tp_pips) if abs(tp - entry) > max_tp_pips else tp
+        tp1 = _cap(tp1)
+        tp2 = _cap(tp2)
+        tp3 = _cap(tp3)
+        rr_label = f"1:{abs(tp3 - entry) / risk:.0f}"
 
     logger.info("[S%d] %s accepted R:R %s", slot_num, direction, rr_label)
 

@@ -68,8 +68,7 @@ def generate_slot5_signal(symbol_config: dict) -> dict | None:
     sym       = symbol_config["symbol"]
     pip       = symbol_config.get("pip_size", 1.0)
     tz_offset = effective_tz_offset(symbol_config)
-    sl_pips   = symbol_config.get("sl_pips", 12)     # Gold=12, US30=100
-    tp3_pips  = symbol_config.get("intraday_tp3_pips", 100)  # Gold=100, US30=300
+    sl_pips = symbol_config.get("sl_pips", 12)     # Gold=12, US30=100
 
     now_bst  = datetime.now(ZoneInfo("Europe/London"))
     bst_date = now_bst.date()
@@ -122,17 +121,18 @@ def generate_slot5_signal(symbol_config: dict) -> dict | None:
                 continue
 
             _, entry = result
-            sign     = 1 if direction == "BUY" else -1
-            sl       = (level_val - sl_pips * pip) if direction == "BUY" \
-                       else (level_val + sl_pips * pip)
-            tp1      = entry + sign * 36 * pip
-            tp2      = entry + sign * 60 * pip
-            tp3_cand = entry + sign * tp3_pips * pip
+            sign = 1 if direction == "BUY" else -1
+            sl   = (level_val - sl_pips * pip) if direction == "BUY" \
+                   else (level_val + sl_pips * pip)
+            risk = abs(entry - sl)
+            # TP3 candidate at 1:4 R:R; build_signal caps at 1:6 / max_tp_pips
+            tp3_cand = entry + sign * risk * 4
 
             reason = f"NY sweep {level_name} — displacement + OB retest"
             logger.info("[S5][%s] %s at %s. Entry=%.2f SL=%.2f", sym, direction, level_name, entry, sl)
 
-            sig = build_signal(direction, entry, sl, tp1, tp2, tp3_cand, reason, 5)
+            sig = build_signal(direction, entry, sl, tp3_cand, reason, 5,
+                               max_tp_pips=symbol_config.get("max_tp_pips"))
             if sig:
                 return sig
 

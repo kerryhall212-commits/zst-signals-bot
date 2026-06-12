@@ -25,9 +25,7 @@ from config import M30_BARS, H1_BARS, DAY_BARS, WEEK_BARS
 
 logger = logging.getLogger(__name__)
 
-_SL_PIPS  = 12
-_TP1_PIPS = 36
-_TP2_PIPS = 60
+_SL_PIPS       = 12
 _MIN_WICK_PIPS = 3  # wick must clear the level by at least 3 pips
 
 
@@ -82,13 +80,11 @@ def generate_slot1_signal(symbol_config: dict) -> dict | None:
             if cc < co:  # confirm candle is bearish
                 entry    = cc
                 sl       = pdh + _SL_PIPS * pip
-                sign     = -1
-                tp1      = entry + sign * _TP1_PIPS * pip
-                tp2      = entry + sign * _TP2_PIPS * pip
-                tp3_cand = pdl     # opposite level
+                tp3_cand = pdl     # opposite level as TP3 target
 
-                sig = build_signal("SELL", entry, sl, tp1, tp2, tp3_cand,
-                                   "Tokyo PDH sweep — 30M wick rejection", 1)
+                sig = build_signal("SELL", entry, sl, tp3_cand,
+                                   "Tokyo PDH sweep — 30M wick rejection", 1,
+                                   max_tp_pips=symbol_config.get("max_tp_pips"))
                 if sig:
                     logger.info("[S1][%s] SELL — PDH %.2f swept. Entry=%.2f SL=%.2f",
                                 sym, pdh, entry, sl)
@@ -99,13 +95,11 @@ def generate_slot1_signal(symbol_config: dict) -> dict | None:
             if cc > co:  # confirm candle is bullish
                 entry    = cc
                 sl       = pdl - _SL_PIPS * pip
-                sign     = 1
-                tp1      = entry + sign * _TP1_PIPS * pip
-                tp2      = entry + sign * _TP2_PIPS * pip
-                tp3_cand = pdh     # opposite level
+                tp3_cand = pdh     # opposite level as TP3 target
 
-                sig = build_signal("BUY", entry, sl, tp1, tp2, tp3_cand,
-                                   "Tokyo PDL sweep — 30M wick rejection", 1)
+                sig = build_signal("BUY", entry, sl, tp3_cand,
+                                   "Tokyo PDL sweep — 30M wick rejection", 1,
+                                   max_tp_pips=symbol_config.get("max_tp_pips"))
                 if sig:
                     logger.info("[S1][%s] BUY — PDL %.2f swept. Entry=%.2f SL=%.2f",
                                 sym, pdl, entry, sl)

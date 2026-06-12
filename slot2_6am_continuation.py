@@ -26,10 +26,7 @@ from config import H1_BARS, DAY_BARS, WEEK_BARS
 
 logger = logging.getLogger(__name__)
 
-_SL_PIPS           = 12
-_TP1_PIPS          = 36
-_TP2_PIPS          = 60
-_TP3_PIPS          = 100
+_SL_PIPS            = 12
 _MIN_OVERNIGHT_PIPS = 20   # overnight move must be at least 20 pips
 _CE_TOLERANCE_PIPS  = 15   # price must be within 15 pips of CE to fire
 _NEAR_LEVEL_PIPS    = 20   # must be near a key level within 20 pips
@@ -138,10 +135,11 @@ def generate_slot2_signal(symbol_config: dict) -> dict | None:
     entry = current_close
     sign  = 1 if direction == "BUY" else -1
     sl    = (ob_low  - _SL_PIPS * pip) if direction == "BUY" else (ob_high + _SL_PIPS * pip)
-    tp1   = entry + sign * _TP1_PIPS * pip
-    tp2   = entry + sign * _TP2_PIPS * pip
-    tp3c  = entry + sign * _TP3_PIPS * pip
+    risk  = abs(entry - sl)
+    # TP3 candidate at 1:4 R:R; build_signal will cap at 1:6 / max_tp_pips
+    tp3c  = entry + sign * risk * 4
 
     logger.info("[S2][%s] %s OB CE=%.2f Entry=%.2f SL=%.2f", sym, direction, ce, entry, sl)
-    return build_signal(direction, entry, sl, tp1, tp2, tp3c,
-                        "6AM OB continuation — overnight move CE retest", 2)
+    return build_signal(direction, entry, sl, tp3c,
+                        "6AM OB continuation — overnight move CE retest", 2,
+                        max_tp_pips=symbol_config.get("max_tp_pips"))

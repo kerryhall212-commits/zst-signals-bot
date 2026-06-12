@@ -19,6 +19,7 @@ SYMBOLS = {
         "sl_pips": 12,            # SL = swept level + 12 pips (default)
         "sl_min_from_entry": 10,  # extend SL if closer than 10 pips to entry
         "sl_max_from_entry": 15,  # reject setup if SL is more than 15 pips from entry
+        "max_tp_pips": 150,       # TPs never exceed 150 pips from entry on Gold
         "td_tz_offset": 3,
         # Intraday momentum + daily guaranteed fixed pip levels
         "intraday_sl_pips":  15,

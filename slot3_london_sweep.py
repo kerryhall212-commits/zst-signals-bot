@@ -28,11 +28,8 @@ from config import M15_BARS, H1_BARS, DAY_BARS, WEEK_BARS
 
 logger = logging.getLogger(__name__)
 
-_SL_PIPS   = 12
-_TP1_PIPS  = 36
-_TP2_PIPS  = 60
-_TP3_PIPS  = 100
-_MIN_WICK  = 3   # level breach must be >= 3 pips
+_SL_PIPS  = 12
+_MIN_WICK = 3   # level breach must be >= 3 pips
 
 
 def _sweep_and_displace(bars: list, level: float, direction: str, pip: float):
@@ -135,17 +132,18 @@ def generate_slot3_signal(symbol_config: dict) -> dict | None:
                 logger.info("[S3][%s] DXY rejects %s.", sym, direction)
                 continue
 
-            sign     = 1 if direction == "BUY" else -1
-            sl       = (level_val - _SL_PIPS * pip) if direction == "BUY" \
-                       else (level_val + _SL_PIPS * pip)
-            tp1      = entry + sign * _TP1_PIPS * pip
-            tp2      = entry + sign * _TP2_PIPS * pip
-            tp3_cand = entry + sign * _TP3_PIPS * pip
+            sign = 1 if direction == "BUY" else -1
+            sl   = (level_val - _SL_PIPS * pip) if direction == "BUY" \
+                   else (level_val + _SL_PIPS * pip)
+            risk = abs(entry - sl)
+            # TP3 candidate at 1:4 R:R; build_signal caps at 1:6 / max_tp_pips
+            tp3_cand = entry + sign * risk * 4
 
             reason = f"London sweep {level_name} — MSS + OB retest"
             logger.info("[S3][%s] %s at %s. Entry=%.2f SL=%.2f", sym, direction, level_name, entry, sl)
 
-            sig = build_signal(direction, entry, sl, tp1, tp2, tp3_cand, reason, 3)
+            sig = build_signal(direction, entry, sl, tp3_cand, reason, 3,
+                               max_tp_pips=symbol_config.get("max_tp_pips"))
             if sig:
                 return sig
 
