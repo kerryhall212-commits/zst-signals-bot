@@ -44,7 +44,7 @@ def generate_slot5_signal(symbol_config: dict) -> dict | None:
     bst_date = now_bst.date()
     mins     = now_bst.hour * 60 + now_bst.minute
 
-    if not (13 * 60 + 30 <= mins < 15 * 60):
+    if not (13 * 60 <= mins < 16 * 60):
         return None
 
     try:

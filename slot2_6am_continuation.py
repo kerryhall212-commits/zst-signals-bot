@@ -41,7 +41,7 @@ def generate_slot2_signal(symbol_config: dict) -> dict | None:
     bst_date = now_bst.date()
     mins     = now_bst.hour * 60 + now_bst.minute
 
-    if not (6 * 60 <= mins < 7 * 60 + 30):
+    if not (5 * 60 + 45 <= mins < 8 * 60):
         return None
 
     try:
@@ -132,12 +132,11 @@ def generate_slot2_signal(symbol_config: dict) -> dict | None:
         return None
 
     # ── Build signal ──────────────────────────────────────────────────────
-    entry = current_close
-    sign  = 1 if direction == "BUY" else -1
-    sl    = (ob_low  - _SL_PIPS * pip) if direction == "BUY" else (ob_high + _SL_PIPS * pip)
-    risk  = abs(entry - sl)
-    # Runner candidate at 1:4; build_signal adds TP4 if >=1:4 and TP5 if >=1:5
-    runner = entry + sign * risk * 4
+    entry   = current_close
+    sign    = 1 if direction == "BUY" else -1
+    sl_pips = symbol_config.get("intraday_sl_pips", 15)
+    sl      = entry - sign * sl_pips * pip
+    runner  = entry + sign * sl_pips * pip * 4
 
     logger.info("[S2][%s] %s OB CE=%.2f Entry=%.2f SL=%.2f", sym, direction, ce, entry, sl)
     return build_signal(direction, entry, sl, runner,

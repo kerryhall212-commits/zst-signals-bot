@@ -16,6 +16,7 @@ from datetime import datetime
 
 from signal_engine import _fetch
 from key_levels import get_all_levels
+from slot_helpers import build_signal
 from config import H1_BARS, DAY_BARS, WEEK_BARS
 
 logger = logging.getLogger(__name__)
@@ -30,51 +31,12 @@ def _fetch_dxy():
         return None
 
 
-def _build_signal(direction: str, entry: float, pip: float,
-                  sl_pips: int, tp1_pips: int, tp2_pips: int,
-                  tp3_pips: int, reason: str, inv_label: str) -> dict | None:
-    """Fixed-pip signal with global 1:3 min / 1:6 max R:R rule."""
-    sign = 1 if direction == "BUY" else -1
-    risk = sl_pips * pip
-    sl   = entry - sign * risk
-    tp1  = entry + sign * tp1_pips * pip
-    tp2  = entry + sign * tp2_pips * pip
-
-    rr_raw = tp3_pips / sl_pips
-    if rr_raw < 3:
-        logger.info("[DS] R:R %.2f below 1:3 — rejected.", rr_raw)
-        return None
-    if rr_raw > 6:
-        tp3      = entry + sign * 6 * risk
-        rr_label = "1:6"
-    else:
-        tp3      = entry + sign * tp3_pips * pip
-        rr_label = f"1:{rr_raw:.0f}"
-
-    return {
-        "direction":          direction,
-        "entry":              entry,
-        "sl":                 sl,
-        "tp1":                tp1,
-        "tp2":                tp2,
-        "tp3":                tp3,
-        "rr":                 rr_label,
-        "reason":             reason,
-        "inv_label":          inv_label,
-        "invalidation_price": sl,
-        "invalidation_side":  "above" if direction == "SELL" else "below",
-        "signal_type":        "daily_guaranteed",
-    }
-
 
 def generate_daily_signal(symbol_config: dict) -> dict | None:
     sym       = symbol_config["symbol"]
     pip       = symbol_config.get("pip_size", 1.0)
     near_pips = symbol_config.get("daily_near_pips", 50)
-    sl_pips   = symbol_config.get("intraday_sl_pips",  15)
-    tp1_pips  = symbol_config.get("intraday_tp1_pips", 45)
-    tp2_pips  = symbol_config.get("intraday_tp2_pips", 60)
-    tp3_pips  = symbol_config.get("intraday_tp3_pips", 100)
+    sl_pips   = symbol_config.get("intraday_sl_pips", 15)
 
     try:
         weekly = _fetch(symbol_config, "1week", WEEK_BARS)
@@ -164,9 +126,11 @@ def generate_daily_signal(symbol_config: dict) -> dict | None:
         else:
             inv_label = "1H close below SL"
 
-    sig = _build_signal(direction, price, pip,
-                        sl_pips, tp1_pips, tp2_pips, tp3_pips,
-                        reason_str, inv_label)
+    sign   = 1 if direction == "BUY" else -1
+    sl     = price - sign * sl_pips * pip
+    runner = pdh if direction == "BUY" else pdl  # far liquidity target for runners
+
+    sig = build_signal(direction, price, sl, runner, reason_str, 6)
     if sig:
-        sig["slot"] = 6
+        sig["inv_label"] = inv_label
     return sig

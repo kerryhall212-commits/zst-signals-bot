@@ -38,7 +38,7 @@ def generate_slot4_signal(symbol_config: dict) -> dict | None:
     bst_date = now_bst.date()
     mins     = now_bst.hour * 60 + now_bst.minute
 
-    if not (10 * 60 <= mins < 11 * 60 + 30):
+    if not (10 * 60 <= mins < 13 * 60):
         return None
 
     try:
@@ -106,10 +106,10 @@ def generate_slot4_signal(symbol_config: dict) -> dict | None:
         logger.info("[S4][%s] DXY rejects %s.", sym, direction)
         return None
 
-    sign = 1 if direction == "BUY" else -1
-    sl   = or_low - _SL_PIPS * pip if direction == "BUY" else or_high + _SL_PIPS * pip
-    risk = abs(current_close - sl)
-    runner = current_close + sign * risk * 4
+    sign    = 1 if direction == "BUY" else -1
+    sl_pips = symbol_config.get("intraday_sl_pips", 15)
+    sl      = current_close - sign * sl_pips * pip
+    runner  = current_close + sign * sl_pips * pip * 4
 
     reason = "London continuation — 50% OR pullback OB retest"
     logger.info("[S4][%s] %s OR_mid=%.2f Entry=%.2f SL=%.2f", sym, direction, or_mid, current_close, sl)

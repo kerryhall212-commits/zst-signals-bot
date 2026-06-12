@@ -137,7 +137,7 @@ def is_scan_window() -> bool:
     now = datetime.now(ZoneInfo("Europe/London"))
     if now.weekday() >= 5:
         return False
-    return 5 * 60 + 45 <= _bst_mins() < 22 * 60
+    return 5 * 60 + 45 <= _bst_mins() < 16 * 60
 
 
 def near_7am_bst() -> bool:
@@ -185,11 +185,11 @@ def _slot_window_active(slot: int) -> bool:
     if now_bst.weekday() >= 5:
         return False
     return {
-        1: 0       <= m < 3 * 60,
-        2: 6 * 60  <= m < 7 * 60 + 30,
-        3: 8 * 60  <= m < 10 * 60,
-        4: 10 * 60 <= m < 11 * 60 + 30,
-        5: 13 * 60 + 30 <= m < 15 * 60,
+        1: 0             <= m < 5 * 60 + 45,   # 00:00–05:44 Tokyo
+        2: 5 * 60 + 45   <= m < 8 * 60,         # 05:45–07:59 Pre-London
+        3: 8 * 60        <= m < 10 * 60,         # 08:00–09:59 London Open
+        4: 10 * 60       <= m < 13 * 60,         # 10:00–12:59 London
+        5: 13 * 60       <= m < 16 * 60,         # 13:00–15:59 NY
     }.get(slot, False)
 
 
@@ -248,6 +248,15 @@ _SLOT_GENERATORS = {
     5: generate_slot5_signal,
 }
 
+_SLOT_SESSIONS = {
+    1: "Tokyo",
+    2: "Pre-London",
+    3: "London Open",
+    4: "London",
+    5: "NY",
+    6: "NY",
+}
+
 _SLOT_GOLD_ONLY        = {1}  # slots that only run on Gold
 _BRIEFING_EXEMPT_SLOTS = {1}  # slots that run before the morning briefing is posted
 
@@ -268,7 +277,7 @@ def run_slot(slot: int) -> None:
         logger.debug("[S%d] Already fired today — skipping.", slot)
         return
     if slot not in _BRIEFING_EXEMPT_SLOTS and not is_scan_window():
-        logger.info("[S%d] Scan blocked — briefing not posted or outside window.", slot)
+        logger.info("[S%d] Scan blocked — outside trading window.", slot)
         return
     if daily_counter.is_limit_reached():
         logger.info("[S%d] Daily limit reached.", slot)
@@ -287,6 +296,10 @@ def run_slot(slot: int) -> None:
         signal = gen(info)
         if signal is None:
             continue
+
+        now_bst_t = datetime.now(ZoneInfo("Europe/London"))
+        signal["session"] = _SLOT_SESSIONS.get(slot, "")
+        signal["signal_time_bst"] = now_bst_t.strftime("%H:%M BST")
 
         # OB invalidation — post cancellation message, don't count as signal
         if signal.get("signal_type") == "ob_invalidated":
@@ -472,6 +485,10 @@ def run_daily_guaranteed(ignore_news: bool = False) -> None:
         if is_final:
             msg += _LIMIT_FOOTER
 
+        now_bst_t = datetime.now(ZoneInfo("Europe/London"))
+        signal["session"] = "NY"
+        signal["signal_time_bst"] = now_bst_t.strftime("%H:%M BST")
+
         if send_message(msg):
             count, just_hit = daily_counter.increment()
             trade_log.record_signal(sym_key, info, signal)
@@ -635,41 +652,36 @@ def main():
             else:
                 logger.warning("Briefing failed — will retry next poll.")
 
-        # ── 2. Slot 1 — Tokyo PDH/PDL Sweep (00:00–03:00 BST, 1H) ───────
+        # ── 2. Slot 1 — Tokyo (00:00–05:44 BST, 1H) ─────────────────────
         if _slot_window_active(1) and near_1h_close():
             run_slot(1)
 
-        # ── 3. Slot 2 — 6AM Continuation (06:00–07:30 BST, H1) ──────────
+        # ── 3. Slot 2 — Pre-London (05:45–07:59 BST, 1H) ────────────────
         if _slot_window_active(2) and near_1h_close():
             run_slot(2)
 
-        # ── 4. Morning priority signal: 07:00 BST ────────────────────────
-        if near_7am_bst() and today_bst != _morning_signal_day:
-            run_morning_signal()
-            _morning_signal_day = today_bst
-
-        # ── 5. Slot 3 — London Open Sweep (08:00–10:00 BST, 15M) ─────────
+        # ── 4. Slot 3 — London Open (08:00–09:59 BST, 15M) ──────────────
         if _slot_window_active(3) and near_15m_close():
             run_slot(3)
 
-        # ── 6. Slot 4 — London Continuation (10:00–11:30 BST, 30M) ──────
+        # ── 5. Slot 4 — London (10:00–12:59 BST, 30M) ───────────────────
         if _slot_window_active(4) and near_30m_close():
             run_slot(4)
 
-        # ── 7. Slot 6 — Guaranteed daily: 13:00 BST (primary) ────────────
+        # ── 6. Slot 6 — Guaranteed daily: 13:00 BST (primary) ────────────
         if near_13_bst() and today_bst != _daily_g_13_tried:
             _daily_g_13_tried = today_bst
             run_daily_guaranteed(ignore_news=False)
 
-        # ── 8. TT NY session: 13:30 BST (Tuesdays only) ──────────────────
+        # ── 7. TT NY session: 13:30 BST (Tuesdays only) ──────────────────
         if near_ny_open():
             run_tt_session("NY")
 
-        # ── 9. Slot 5 — NY Open Sweep (13:30–15:00 BST, 15M) ─────────────
+        # ── 8. Slot 5 — NY (13:00–15:59 BST, 15M) ───────────────────────
         if _slot_window_active(5) and near_15m_close():
             run_slot(5)
 
-        # ── 10. Slot 6 fallback: 14:30 BST (if 13:00 news-blocked) ───────
+        # ── 9. Slot 6 fallback: 14:30 BST (if 13:00 news-blocked) ────────
         if near_1430_bst() and today_bst != _daily_g_fired_day:
             run_daily_guaranteed(ignore_news=True)
 
