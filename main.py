@@ -14,6 +14,7 @@ Level schedule:
   07:00 BST (weekdays) → add Asian H/L to levels.json
 """
 
+import glob as _glob
 import logging
 import os
 import time
@@ -38,8 +39,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_BRIEFING_LOCK_FILE = "briefing_sent_today.txt"
-
 _OB_INVALIDATION_MSG = (
     "⚠️ <b>ZST UPDATE</b>\n\n"
     "Signal invalidated — OB broken\n"
@@ -47,9 +46,10 @@ _OB_INVALIDATION_MSG = (
     "ZST Insider 🔐"
 )
 
-_levels_computed_day:   str = ""
+_levels_computed_day:    str = ""
 _asian_levels_added_day: str = ""
-_briefing_posted_day:   str = ""
+_briefing_posted_day:    str = ""
+_briefing_cleanup_day:   str = ""
 
 
 # ── Time helpers ───────────────────────────────────────────────────────────────
@@ -86,27 +86,48 @@ def get_current_session() -> str | None:
 
 # ── Briefing file lock (survives restarts) ─────────────────────────────────────
 
+def _briefing_lock_path(today: str) -> str:
+    return f"briefing_sent_{today}.txt"
+
+
 def _briefing_lock_exists(today: str) -> bool:
-    try:
-        with open(_BRIEFING_LOCK_FILE) as f:
-            return f.read().strip() == today
-    except FileNotFoundError:
-        return False
+    return os.path.exists(_briefing_lock_path(today))
 
 
 def _write_briefing_lock(today: str) -> None:
-    with open(_BRIEFING_LOCK_FILE, "w") as f:
+    with open(_briefing_lock_path(today), "w") as f:
         f.write(today)
+
+
+def _clean_old_briefing_files(today: str) -> None:
+    keep = _briefing_lock_path(today)
+    for path in _glob.glob("briefing_sent_*.txt"):
+        if not path.endswith(keep):
+            try:
+                os.remove(path)
+                logger.info("Removed old briefing lock: %s", path)
+            except Exception as e:
+                logger.warning("Could not remove old briefing lock %s: %s", path, e)
 
 
 # ── Signal dispatch ────────────────────────────────────────────────────────────
 
 def _post_signal(sym_key: str, symbol_config: dict, signal: dict,
                  session: str) -> bool:
+    # Bug 3 safety gate: reject any signal where SL distance exceeds per-symbol max
+    pip         = symbol_config.get("pip_size", 1.0)
+    max_sl_pips = symbol_config.get("intraday_sl_pips", 15)
+    sl_dist     = abs(signal["entry"] - signal["sl"]) / pip
+    if sl_dist > max_sl_pips:
+        logger.info("[%s][%s] Signal rejected — SL %.1f pips exceeds max %d.",
+                    sym_key, session, sl_dist, max_sl_pips)
+        return False
+
     msg = format_signal(symbol_config, signal)
     if not send_message(msg):
         logger.error("[%s][%s] Telegram send failed.", sym_key, session)
         return False
+    # Record ONLY after Telegram confirms delivery
     count = session_counter.mark_session_fired(sym_key, session)
     trade_log.record_signal(sym_key, symbol_config, signal)
     logger.info("[%s][%s] Signal posted. Daily total: %d/%d",
@@ -157,7 +178,7 @@ def run_session_scan(session: str) -> None:
 # ── Main loop ──────────────────────────────────────────────────────────────────
 
 def main():
-    global _levels_computed_day, _asian_levels_added_day, _briefing_posted_day
+    global _levels_computed_day, _asian_levels_added_day, _briefing_posted_day, _briefing_cleanup_day
 
     td_key   = os.getenv("TWELVEDATA_API_KEY")
     tg_token = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -186,6 +207,12 @@ def main():
                         now_bst.strftime("%H:%M"),
                         session_counter.get_count(),
                         session_counter.MAX_DAILY)
+
+        # ── 0. Midnight cleanup of old briefing lock files ────────────────
+        if now_bst.hour == 0 and now_bst.minute < 10:
+            if today_bst != _briefing_cleanup_day:
+                _clean_old_briefing_files(today_bst)
+                _briefing_cleanup_day = today_bst
 
         # ── 1. Compute levels at 21:00 BST (weekdays) ─────────────────────
         if now_bst.weekday() < 5 and now_bst.hour == 21 and now_bst.minute < 10:

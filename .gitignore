@@ -1,8 +1,13 @@
 .env
 .claude/
 bot.log
+bot_live.log
 daily_counter.json
 trade_log.json
+levels.json
+briefing_sent_*.txt
+_msg_out.txt
+_verify_out.txt
 __pycache__/
 *.pyc
 *.pyo
