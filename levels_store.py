@@ -9,7 +9,7 @@ import os
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from signal_engine import _fetch
+from data_fetcher import fetch_candles
 from key_levels import prev_day_levels, prev_week_levels, asian_session_levels
 from config import SYMBOLS, H1_BARS, DAY_BARS, WEEK_BARS
 
@@ -24,8 +24,8 @@ def compute_and_save() -> dict:
     levels = {}
     for sym_key, cfg in SYMBOLS.items():
         try:
-            daily  = _fetch(cfg, "1day",  DAY_BARS)
-            weekly = _fetch(cfg, "1week", WEEK_BARS)
+            daily  = fetch_candles(cfg, "1day",  DAY_BARS)
+            weekly = fetch_candles(cfg, "1week", WEEK_BARS)
             pd_lv  = prev_day_levels(daily)
             pw_lv  = prev_week_levels(weekly)
             levels[sym_key] = {
@@ -65,7 +65,7 @@ def add_asian_levels() -> None:
 
     for sym_key, cfg in SYMBOLS.items():
         try:
-            h1  = _fetch(cfg, "1h", H1_BARS)
+            h1  = fetch_candles(cfg, "1h", H1_BARS)
             asl = asian_session_levels(h1)
             if sym_key not in levels:
                 levels[sym_key] = {}

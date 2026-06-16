@@ -1,5 +1,6 @@
 import os
 import logging
+from datetime import datetime, timedelta
 import requests
 import pandas as pd
 
@@ -54,3 +55,16 @@ def fetch_ohlcv(symbol: str, interval: str = "1h", outputsize: int = 100) -> pd.
         logger.warning("Symbol %r [%s] API error: %s", sym, interval, last_err)
 
     raise ValueError(f"API error for {symbol} [{interval}] (tried {attempts}): {last_err}")
+
+
+def fetch_candles(symbol_config: dict, interval: str, outputsize: int) -> pd.DataFrame:
+    """Route to yfinance or TwelveData depending on symbol config."""
+    if symbol_config.get("data_source") == "yfinance":
+        from yfinance_fetcher import fetch_ohlcv_yf
+        return fetch_ohlcv_yf(symbol_config["yf_symbol"], interval, outputsize)
+    return fetch_ohlcv(symbol_config["symbol"], interval, outputsize)
+
+
+def td_to_utc_close(time_str: str, tz_offset: int) -> datetime:
+    """Convert a TwelveData candle timestamp to its UTC close time."""
+    return datetime.fromisoformat(time_str) - timedelta(hours=tz_offset)

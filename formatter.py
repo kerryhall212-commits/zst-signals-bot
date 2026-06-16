@@ -1,4 +1,4 @@
-"""Signal and TP/SL notification formatters."""
+"""Webhook signal and trade outcome formatters."""
 
 
 def fmt(price: float, decimals: int = 0) -> str:
@@ -7,31 +7,33 @@ def fmt(price: float, decimals: int = 0) -> str:
     return f"{price:,.{decimals}f}"
 
 
-def format_signal(symbol_config: dict, signal: dict) -> str:
-    tick = symbol_config["ticker"]
-    dir_ = signal["direction"]
-    side = signal["invalidation_side"]
-    inv  = signal["invalidation_price"]
+def _fmt_price(value) -> str:
+    try:
+        v = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if v == int(v):
+        return f"{int(v):,}"
+    return f"{v:,.2f}"
+
+
+def format_webhook_signal(signal: dict) -> str:
+    direction = signal["direction"]
+    symbol    = signal["symbol"]
+    side      = "above" if direction == "SELL" else "below"
 
     lines = [
         "🎯 <b>ZST SIGNAL</b>",
         "",
-        f"<b>{dir_}</b> | <b>{tick}</b>",
-        f"Entry: <code>{fmt(signal['entry'])}</code>",
-        f"SL: <code>{fmt(signal['sl'])}</code>",
-        f"TP1: <code>{fmt(signal['tp1'])}</code>",
-        f"TP2: <code>{fmt(signal['tp2'])}</code>",
-        f"TP3: <code>{fmt(signal['tp3'])}</code>",
-    ]
-    if "tp4" in signal:
-        lines.append(f"TP4: <code>{fmt(signal['tp4'])}</code>")
-    if "tp5" in signal:
-        lines.append(f"TP5: <code>{fmt(signal['tp5'])}</code>")
-
-    lines += [
+        f"<b>{direction}</b> | <b>{symbol}</b>",
+        f"Entry: <code>{_fmt_price(signal['entry'])}</code>",
+        f"SL: <code>{_fmt_price(signal['sl'])}</code>",
+        f"TP1: <code>{_fmt_price(signal['tp1'])}</code>",
+        f"TP2: <code>{_fmt_price(signal['tp2'])}</code>",
+        f"TP3: <code>{_fmt_price(signal['tp3'])}</code>",
         "",
         f"Reason: {signal['reason']}",
-        f"Invalidation: 1H close {side} <code>{fmt(inv)}</code>",
+        f"Invalidation: 1H close {side} <code>{_fmt_price(signal['sl'])}</code>",
         "",
         "ZST Insider 🔐",
     ]
@@ -77,15 +79,14 @@ def format_tp_notification(trade: dict, level: str) -> str:
             "ZST Insider 🔐",
         ])
 
-    if level in ("tp4", "tp5"):
-        tp_val = trade.get(level)
+    if level == "be":
         return "\n".join([
-            f"💰 <b>RUNNER HIT — {header}</b>",
+            f"⚖️ <b>BREAKEVEN — {header}</b>",
             "",
             f"Entry: <code>{entry}</code>",
-            f"{level.upper()}: <code>{fmt(tp_val) if tp_val else '—'}</code> ✅",
+            "Stopped at breakeven after TP1 — no loss 🔒",
             "",
-            "God is good 🙏",
+            "Next setup loading 💪",
             "ZST Insider 🔐",
         ])
 
